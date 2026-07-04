@@ -17,16 +17,19 @@ const superAdminRoutes = require("./routes/SuperadminRoutes");
 const app = express();
 connectDB();
 
+// Allowed origins come from the CORS_ORIGINS env var (comma-separated).
+// Falls back to localhost + the Cloudflare frontend for convenience.
+const allowedOrigins = (
+  process.env.CORS_ORIGINS ||
+  "http://localhost:3000,https://gruhakalpa-frontend.pages.dev"
+)
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    // origin: [
-    //   "https://navanagara-project-2.onrender.com",
-    //   "https://www.navanagarahousebuildingsociety.com",
-    //   "https://navanagarahousebuildingsociety.com",
-    //   "http://3.104.54.57",
-    //   "http://navanagarahousebuildingsociety.com.s3-website-ap-southeast-2.amazonaws.com",
-    // ],
-    origin: ["http://localhost:3000", "http://localhost:3000"],
+    origin: allowedOrigins,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
