@@ -117,13 +117,13 @@ async function processBooking(booking, { today = new Date(), dryRun = false } = 
     const wa = await sendWhatsApp({
       to: contact.mobile,
       templateType: info.type === "overdue" ? "overdue" : "reminder",
-      variables: [
-        info.name,
-        info.pendingAmount,
-        info.installmentLabel,
-        info.membershipId,
-        info.dueDateFormatted,
-      ],
+      variables: {
+        customer_name: info.name,
+        amount: info.pendingAmount,
+        installment: info.installmentLabel,
+        membership_id: info.membershipId,
+        due_date: info.dueDateFormatted,
+      },
     });
     channels.push({ channel: "whatsapp", ...wa });
   } else {

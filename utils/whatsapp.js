@@ -9,15 +9,15 @@
  *   MSG91_WHATSAPP_NAMESPACE - (optional) template namespace, if your account uses one
  *
  * Template names (create these in MSG91 with EXACTLY these names):
- *   payment_reminder   - used for due / upcoming reminders
- *   payment_overdue    - used once the due date has passed
+ *   gruhakalpa_payment_reminder   - used for due / upcoming reminders
+ *   gruhakalpa_payment_overdue    - used once the due date has passed
  *
- * Both templates take 5 body variables in this order:
- *   {{1}} name
- *   {{2}} pending amount (number, no currency symbol)
- *   {{3}} installment label (e.g. "Installment 1" or "Full Payment")
- *   {{4}} membership id
- *   {{5}} due date (DD-MM-YYYY)
+ * Both templates use these NAMED body variables:
+ *   {{customer_name}}   member name
+ *   {{amount}}          pending amount (number, no currency symbol)
+ *   {{installment}}     installment label (e.g. "Installment 1" or "Full Payment")
+ *   {{membership_id}}   membership id
+ *   {{due_date}}        due date (DD-MM-YYYY)
  */
 
 const MSG91_WHATSAPP_ENDPOINT =
@@ -25,9 +25,18 @@ const MSG91_WHATSAPP_ENDPOINT =
 
 // Template names — keep these identical to the names you create in MSG91.
 const TEMPLATES = {
-  reminder: "payment_reminder",
-  overdue: "payment_overdue",
+  reminder: "gruhakalpa_payment_reminder",
+  overdue: "gruhakalpa_payment_overdue",
 };
+
+// The named variables both templates expect, in order.
+const VARIABLE_NAMES = [
+  "customer_name",
+  "amount",
+  "installment",
+  "membership_id",
+  "due_date",
+];
 
 function isConfigured() {
   return Boolean(
@@ -43,12 +52,13 @@ function normaliseNumber(mobile) {
 }
 
 /**
- * Send a WhatsApp template message.
+ * Send a WhatsApp template message with NAMED variables.
  *
  * @param {Object} opts
  * @param {string} opts.to          - recipient mobile number
  * @param {"reminder"|"overdue"} opts.templateType
- * @param {string[]} opts.variables - ordered body variables ({{1}}..{{5}})
+ * @param {Object} opts.variables   - named variables, e.g.
+ *        { customer_name, amount, installment, membership_id, due_date }
  * @returns {Promise<{success:boolean, error?:string}>}
  */
 async function sendWhatsApp({ to, templateType, variables }) {
@@ -60,10 +70,10 @@ async function sendWhatsApp({ to, templateType, variables }) {
   const templateName = TEMPLATES[templateType] || TEMPLATES.reminder;
   const recipient = normaliseNumber(to);
 
-  // Build the component variables map ({{1}}..{{n}})
+  // Build the component variables map keyed by VARIABLE NAME ({{customer_name}}, ...)
   const components = {};
-  variables.forEach((val, i) => {
-    components[`${i + 1}`] = { type: "text", value: String(val) };
+  VARIABLE_NAMES.forEach((name) => {
+    components[name] = { type: "text", value: String(variables[name] ?? "") };
   });
 
   const payload = {
@@ -106,9 +116,7 @@ async function sendWhatsApp({ to, templateType, variables }) {
       return { success: false, error: data?.message || `HTTP ${res.status}` };
     }
 
-    console.log(
-      `✅ WhatsApp [${templateName}] sent to ${recipient}`,
-    );
+    console.log(`✅ WhatsApp [${templateName}] sent to ${recipient}`);
     return { success: true };
   } catch (err) {
     console.error(`❌ MSG91 WhatsApp error to ${recipient}:`, err.message);
@@ -116,4 +124,4 @@ async function sendWhatsApp({ to, templateType, variables }) {
   }
 }
 
-module.exports = { sendWhatsApp, TEMPLATES, isConfigured };
+module.exports = { sendWhatsApp, TEMPLATES, VARIABLE_NAMES, isConfigured };
