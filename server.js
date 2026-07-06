@@ -13,9 +13,14 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const siteBookingRoutes = require("./routes/siteBookingRoutes");
 const receiptRoutes = require("./routes/receiptRoutes");
 const superAdminRoutes = require("./routes/SuperadminRoutes");
+const reminderRoutes = require("./routes/reminderRoutes");
+const { startReminderScheduler } = require("./jobs/reminderScheduler");
 
 const app = express();
 connectDB();
+
+// Start the daily payment-reminder scheduler (WhatsApp + email)
+startReminderScheduler();
 
 // Allowed origins come from the CORS_ORIGINS env var (comma-separated).
 // Falls back to localhost + the Cloudflare frontend for convenience.
@@ -51,6 +56,7 @@ app.use("/", paymentRoutes);
 app.use("/", siteBookingRoutes);
 app.use("/", receiptRoutes);
 app.use("/", superAdminRoutes);
+app.use("/", reminderRoutes);
 
 app.get("/test", (req, res) => {
   res.json({

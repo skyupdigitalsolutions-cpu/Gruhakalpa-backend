@@ -58,6 +58,17 @@ const siteBookingSchema = new mongoose.Schema(
     cancelled: { type: Boolean, default: false },
     cancellationPdfUrl: { type: String },
     cancelledAt: { type: Date },
+    // Payment-reminder automation: records each reminder already sent so the
+    // same one is never sent twice. Keyed by installment + milestone.
+    remindersSent: [
+      {
+        key: { type: String },
+        sentAt: { type: Date, default: Date.now },
+        type: { type: String }, // "reminder" | "overdue"
+        pendingAmount: { type: Number },
+        channels: [{ type: String }], // e.g. ["whatsapp:ok", "email:ok"]
+      },
+    ],
   },
   {
     timestamps: true,
