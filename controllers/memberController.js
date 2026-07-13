@@ -1,6 +1,35 @@
 const Member = require("../models/Member");
 const cloudinary = require("../cloudinaryConfig");
 
+// Generate a unique, sequential membership receipt number (digits only, e.g. 000001).
+// Reads the highest existing number and increments; strips any non-digit
+// characters from legacy values so old prefixed numbers still sort correctly.
+const generateMembershipReceiptNumber = async () => {
+  const existing = await Member.find(
+    { membership_receipt_no: { $ne: null } },
+    { membership_receipt_no: 1 },
+  ).lean();
+
+  let max = 0;
+  for (const m of existing) {
+    const n = parseInt(String(m.membership_receipt_no).replace(/\D/g, ""), 10);
+    if (!isNaN(n) && n > max) max = n;
+  }
+
+  let next = max + 1;
+  let receiptNo = String(next).padStart(6, "0");
+  let attempts = 0;
+  // Guard against races / duplicates — bump until unused.
+  while (attempts < 100) {
+    const exists = await Member.findOne({ membership_receipt_no: receiptNo });
+    if (!exists) break;
+    next++;
+    receiptNo = String(next).padStart(6, "0");
+    attempts++;
+  }
+  return receiptNo;
+};
+
 exports.updateMemberById = async (req, res) => {
   try {
     const updated = await Member.updateOne(
@@ -141,8 +170,52 @@ exports.addMember = async (req, res) => {
       );
     }
 
-    const member = new Member(memberData);
-    await member.save();
+    // Receipt number: use the admin-entered value if provided (digits only),
+    // otherwise auto-generate the next sequential number.
+    const providedReceiptNo = String(req.body.membership_receipt_no || "").replace(
+      /\D/g,
+      "",
+    );
+    if (providedReceiptNo) {
+      const duplicate = await Member.findOne({
+        membership_receipt_no: providedReceiptNo,
+      });
+      if (duplicate) {
+        return res.status(409).json({
+          success: false,
+          message: `Receipt number ${providedReceiptNo} already exists. Please use a different number.`,
+        });
+      }
+      memberData.membership_receipt_no = providedReceiptNo;
+    } else {
+      memberData.membership_receipt_no = await generateMembershipReceiptNumber();
+    }
+
+    // Save with a retry guard: if the auto-generated receipt number loses a
+    // race to a concurrent insert, the DB unique index throws E11000 — we then
+    // regenerate the next number and retry. A user-supplied number is never
+    // silently changed; its collision falls through to the 409 handler below.
+    let member;
+    let saveAttempts = 0;
+    while (true) {
+      try {
+        member = new Member(memberData);
+        await member.save();
+        break;
+      } catch (err) {
+        const isReceiptDup =
+          err.code === 11000 &&
+          err.keyValue &&
+          err.keyValue.membership_receipt_no !== undefined;
+        if (isReceiptDup && !providedReceiptNo && saveAttempts < 5) {
+          saveAttempts++;
+          memberData.membership_receipt_no =
+            await generateMembershipReceiptNumber();
+          continue;
+        }
+        throw err;
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -174,7 +247,9 @@ exports.addMember = async (req, res) => {
         message:
           duplicateValue === null
             ? `A database index conflict occurred. Please contact your administrator to drop the stale '${duplicateField}' index from the membership collection.`
-            : `A member with this ${duplicateField} (${duplicateValue}) already exists.`,
+            : duplicateField === "membership_receipt_no"
+              ? `Receipt number ${duplicateValue} already exists. Please use a different number.`
+              : `A member with this ${duplicateField} (${duplicateValue}) already exists.`,
         error: error.message,
       });
     }

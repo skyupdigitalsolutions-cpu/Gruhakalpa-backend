@@ -3,6 +3,9 @@ const SiteBooking = require("../models/SiteBooking");
 const Member = require("../models/Member");
 const sendMail = require("../utils/mailer");
 const cloudinary = require("../cloudinaryConfig");
+const {
+  sendPaymentConfirmation,
+} = require("./paymentReminderController");
 
 // Project code mapping — each project has its own independent receipt sequence
 const PROJECT_CODES = {
@@ -10,14 +13,22 @@ const PROJECT_CODES = {
   "New City 1": "NCS",
 };
 
-// Generate a unique receipt number scoped to a specific project prefix
-// e.g. NCG-RCP-000001, NCS-RCP-000001 (independent counters per project)
-const generateReceiptNumber = async (projectName) => {
-  // Determine prefix from project name, fallback to "RCP" if unknown
-  const code = PROJECT_CODES[projectName] || "RCP";
+// Deposit code mapping — Fixed/Recurring Deposit receipts get their own
+// independent sequence too, scoped separately from site-project receipts.
+const DEPOSIT_CODES = {
+  "Fixed Deposit": "FD",
+  "Recurring Deposit": "RD",
+};
+
+// Generate a unique receipt number scoped to a specific project/deposit prefix
+// e.g. NCG-RCP-000001, NCS-RCP-000001, FD-RCP-000001, RD-RCP-000001
+// (independent counters per project / deposit type)
+const generateReceiptNumber = async (label) => {
+  // Determine prefix from project name or deposit label, fallback to "RCP"
+  const code = PROJECT_CODES[label] || DEPOSIT_CODES[label] || "RCP";
   const prefix = `${code}-RCP-`;
 
-  // Count only receipts belonging to this project's prefix
+  // Count only receipts belonging to this prefix
   const count = await Receipt.countDocuments({
     receipt_no: { $regex: `^${prefix}` },
   });
@@ -62,78 +73,105 @@ exports.updateReceipt = async (req, res) => {
 // Create receipt
 exports.createReceipt = async (req, res) => {
   try {
-    const seniorityNumber = req.body.membershipid;
+    const membershipId = req.body.membershipid;
     const userEmail = req.body.email;
 
-    // VALIDATION 1: Check if seniority number is provided
-    if (!seniorityNumber) {
+    // "site" (default) | "fixed_deposit" | "recurring_deposit"
+    const paymentcategory = req.body.paymentcategory || "site";
+    const isDeposit = paymentcategory !== "site";
+
+    // Human-readable deposit label ("Fixed Deposit" / "Recurring Deposit"),
+    // used only to choose the receipt-number prefix (FD / RD) and to print
+    // on the letterhead receipt. Not used for site-project receipts.
+    const depositLabel = req.body.deposittype || "";
+
+    // VALIDATION 1: Check if membership/deposit account number is provided
+    if (!membershipId) {
       return res.status(400).json({
         success: false,
-        message: "Seniority number is required",
+        message: isDeposit
+          ? "Deposit account number is required"
+          : "Membership ID is required",
       });
     }
 
-    console.log(`🔍 Validating seniority number: ${seniorityNumber}`);
+    let memberDoc = null;
+    let bookingDoc = null;
 
-    // VALIDATION 2: Check if member exists with this seniority number
-    const memberDoc = await Member.findOne({ seniority_no: seniorityNumber });
+    if (!isDeposit) {
+      console.log(`🔍 Validating membership ID: ${membershipId}`);
 
-    if (!memberDoc) {
+      // VALIDATION 2: Check if member exists with this seniority number
+      memberDoc = await Member.findOne({ membership_id: membershipId });
+
+      if (!memberDoc) {
+        console.log(
+          `❌ Member not found for membership ID: ${membershipId}`,
+        );
+        return res.status(404).json({
+          success: false,
+          message: `Member not found with membership ID: ${membershipId}. Please ensure the member is registered first.`,
+        });
+      }
+
+      console.log(`✅ Member found: ${memberDoc.name}`);
+
+      // VALIDATION 3: Check if site booking exists for this seniority number
+      bookingDoc = await SiteBooking.findOne({
+        membership_id: membershipId,
+      });
+
+      if (!bookingDoc) {
+        console.log(
+          `❌ Site booking not found for membership ID: ${membershipId}`,
+        );
+        return res.status(404).json({
+          success: false,
+          message: `Site booking not found for membership ID: ${membershipId}. Please create a site booking first.`,
+        });
+      }
+
+      console.log(`✅ Site booking found for: ${bookingDoc.name}`);
+    } else {
       console.log(
-        `❌ Member not found for seniority number: ${seniorityNumber}`,
+        `🔍 Deposit receipt (${depositLabel || "Deposit"}) — skipping Member/SiteBooking lookup for account: ${membershipId}`,
       );
-      return res.status(404).json({
-        success: false,
-        message: `Member not found with seniority number: ${seniorityNumber}. Please ensure the member is registered first.`,
-      });
     }
-
-    console.log(`✅ Member found: ${memberDoc.name}`);
-
-    // VALIDATION 3: Check if site booking exists for this seniority number
-    const bookingDoc = await SiteBooking.findOne({
-      seniority_no: seniorityNumber,
-    });
-
-    if (!bookingDoc) {
-      console.log(
-        `❌ Site booking not found for seniority number: ${seniorityNumber}`,
-      );
-      return res.status(404).json({
-        success: false,
-        message: `Site booking not found for seniority number: ${seniorityNumber}. Please create a site booking first.`,
-      });
-    }
-
-    console.log(`✅ Site booking found for: ${bookingDoc.name}`);
 
     // All validations passed - proceed with receipt creation
-    const bookingamount = parseInt(bookingDoc.bookingamount || 0);
-    const bank = req.body.bank || bookingDoc.bank || "";
+    const bookingamount = isDeposit ? 0 : parseInt(bookingDoc.bookingamount || 0);
+    const bank = req.body.bank || (bookingDoc && bookingDoc.bank) || "";
     const amountpaid = parseInt(req.body.amountpaid || 0);
 
-    // Generate unique receipt number scoped to the project
-    // Each project (NCG, NCS) has its own independent sequence
-    const projectName = req.body.projectname || bookingDoc.projectname || "";
+    // Deposits are never tied to a project — always stored as "NA".
+    // Site receipts keep the existing project-name resolution.
+    const projectName = isDeposit
+      ? "NA"
+      : req.body.projectname || bookingDoc.projectname || "";
+
+    // Whatever label the receipt-number generator should key off of:
+    // deposit label (FD/RD) for deposits, project name for site receipts.
+    const codeSource = isDeposit ? depositLabel : projectName;
+
     let receipt_no = req.body.receiptNo
       ? String(req.body.receiptNo).trim()
       : "";
 
     if (!receipt_no) {
-      // No receipt number provided — auto-generate one for this project
-      receipt_no = await generateReceiptNumber(projectName);
+      // No receipt number provided — auto-generate one for this project/deposit
+      receipt_no = await generateReceiptNumber(codeSource);
     } else {
       // Receipt number provided — check it doesn't already exist
       const existingReceipt = await Receipt.findOne({ receipt_no });
       if (existingReceipt) {
         console.log(
-          `⚠️ Receipt number '${receipt_no}' already exists — auto-generating new one for project: ${projectName}`,
+          `⚠️ Receipt number '${receipt_no}' already exists — auto-generating new one for: ${codeSource}`,
         );
-        receipt_no = await generateReceiptNumber(projectName);
+        receipt_no = await generateReceiptNumber(codeSource);
       }
     }
     console.log(
-      `🧾 Using receipt number: ${receipt_no} (Project: ${projectName})`,
+      `🧾 Using receipt number: ${receipt_no} (${isDeposit ? depositLabel : "Project: " + projectName})`,
     );
 
     // ✅ CHECK IF PDF WAS SENT FROM FRONTEND
@@ -149,13 +187,14 @@ exports.createReceipt = async (req, res) => {
     if (pdfBase64) {
       try {
         const pdfBuffer = Buffer.from(pdfBase64, "base64");
+        const publicIdSource = isDeposit ? depositLabel : projectName;
         const uploadResult = await new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
             {
               folder: "receipts",
               resource_type: "raw",
               format: "pdf",
-              public_id: `${projectName.replace(/[^a-zA-Z0-9]/g, "_")}_${seniorityNumber}`,
+              public_id: `${publicIdSource.replace(/[^a-zA-Z0-9]/g, "_")}_${membershipId}`,
               type: "upload", // ✅ ensures public delivery type
               access_mode: "public", // ✅ makes the PDF publicly accessible (no 401)
             },
@@ -177,29 +216,34 @@ exports.createReceipt = async (req, res) => {
 
     // Detect if this is the user's very first receipt (new user)
     const existingReceiptCount = await Receipt.countDocuments({
-      seniority_no: seniorityNumber,
+      $or: [{ membershipid: membershipId }, { seniority_no: membershipId }],
       cancelled: { $ne: true },
     });
     const isNewUser = existingReceiptCount === 0;
 
     const receiptData = {
-      membershipid: seniorityNumber,
+      membershipid: membershipId,
       receipt_no,
-      name: req.body.name || memberDoc.name,
+      name: req.body.name || (memberDoc ? memberDoc.name : ""),
       email: userEmail,
-      projectname: req.body.projectname || bookingDoc.projectname,
+      projectname: projectName,
+      paymentcategory,
       date: new Date(req.body.date),
       amountpaid,
       bookingamount,
-      mobilenumber: parseInt(req.body.mobilenumber) || memberDoc.mobile,
+      mobilenumber:
+        parseInt(req.body.mobilenumber) || (memberDoc ? memberDoc.mobile : undefined),
       totalreceived: bookingamount + amountpaid,
       paymentmode: req.body.paymentmode,
       paymenttype: req.body.paymenttype,
       transactionid: req.body.transactionid,
-      sitedimension: req.body.dimension || bookingDoc.sitedimension,
+      // Deposits have no site dimension — always blank.
+      sitedimension: isDeposit
+        ? ""
+        : req.body.dimension || bookingDoc.sitedimension,
       created_by: req.body.created_by || "Admin",
       bank,
-      seniority_no: seniorityNumber,
+      seniority_no: membershipId,
       is_new_user: isNewUser,
       pdfUrl, // ✅ Cloudinary URL of the generated receipt PDF
       // Exact per-bucket split so the next receipt's waterfall is accurate.
@@ -212,8 +256,30 @@ exports.createReceipt = async (req, res) => {
         : [],
     };
 
-    const receipt = new Receipt(receiptData);
-    await receipt.save();
+    // Save with a retry guard: the DB unique index on receipt_no is the source
+    // of truth. If a concurrent insert grabbed the same number first, the save
+    // throws E11000 — we regenerate the next number for this project/deposit
+    // and retry so two receipts can never share a number.
+    let receipt;
+    let saveAttempts = 0;
+    while (true) {
+      try {
+        receipt = new Receipt({ ...receiptData, receipt_no });
+        await receipt.save();
+        break;
+      } catch (err) {
+        const isReceiptDup =
+          err.code === 11000 &&
+          err.keyValue &&
+          err.keyValue.receipt_no !== undefined;
+        if (isReceiptDup && saveAttempts < 5) {
+          saveAttempts++;
+          receipt_no = await generateReceiptNumber(codeSource);
+          continue;
+        }
+        throw err;
+      }
+    }
 
     console.log("📄 Receipt created successfully:", receipt_no);
 
@@ -224,6 +290,20 @@ exports.createReceipt = async (req, res) => {
       data: receipt,
     });
 
+    // Fire a WhatsApp/email "payment received" confirmation (respects the
+    // channels enabled in Automation Setup). Fully background, never blocks.
+    // Only applies to site-project payments — deposits skip this notification.
+    if (!isDeposit) {
+      setImmediate(() => {
+        sendPaymentConfirmation({
+          membership_id: membershipId,
+          amountPaid: amountpaid,
+        }).catch((e) =>
+          console.error("⚠️ Payment confirmation failed:", e.message),
+        );
+      });
+    }
+
     // Send emails in background (after response is sent)
     setImmediate(async () => {
       try {
@@ -231,16 +311,37 @@ exports.createReceipt = async (req, res) => {
         console.log('   PDF Base64:', pdfBase64 ? `Present (${pdfBase64.length} chars)` : 'MISSING');
         console.log('   PDF Filename:', pdfFilename);
 
+        const categoryLine = isDeposit
+          ? `${depositLabel || "Deposit"} Account`
+          : "Membership ID";
+
         // Customer email message
-        const customerMessage = `Dear ${receiptData.name},
+        const customerMessage = isDeposit
+          ? `Dear ${receiptData.name},
+
+Thank you for your payment.
+
+${categoryLine}  : ${membershipId}
+Amount Paid      : Rs.${amountpaid.toLocaleString("en-IN")}
+Payment Mode     : ${receiptData.paymentmode}
+Transaction ID   : ${receiptData.transactionid}
+Date             : ${new Date(receiptData.date).toLocaleDateString("en-IN")}
+
+---
+
+Your payment receipt is attached to this email. For any questions please contact our support team.
+
+Best Regards,
+Navanagara House Building Co-operative Society`
+          : `Dear ${receiptData.name},
 
 Thank you for your payment.
 
 Your account is generated 
 link             : https://www.navanagarahousebuildingsociety.com/memberlogin
-Username         : ${seniorityNumber}
+Username         : ${membershipId}
 password         : ${memberDoc.mobile}
-senority number  : ${seniorityNumber}
+Membership ID    : ${membershipId}
 Amount Paid      : Rs.${amountpaid.toLocaleString("en-IN")}
 Payment Mode     : ${receiptData.paymentmode}
 Transaction ID   : ${receiptData.transactionid}
@@ -257,7 +358,7 @@ Navanagara House Building Co-operative Society`;
         const companyMessage = `New Receipt Generated
 
 Member Name      : ${receiptData.name}
-Seniority Number : ${seniorityNumber}
+${categoryLine}  : ${membershipId}
 Customer Email   : ${userEmail || "Not provided"}
 Mobile           : ${receiptData.mobilenumber || "Not provided"}
 
@@ -270,7 +371,7 @@ Payment Mode     : ${receiptData.paymentmode}
 Payment Type     : ${receiptData.paymenttype}
 Transaction ID   : ${receiptData.transactionid}
 Date             : ${new Date(receiptData.date).toLocaleDateString("en-IN")}
-Project          : ${receiptData.projectname || "N/A"}
+Project          : ${isDeposit ? (depositLabel || "N/A") : (receiptData.projectname || "N/A")}
 
 ---
 
@@ -407,7 +508,7 @@ exports.getReceiptById = async (req, res) => {
 exports.downloadReceiptPDF = async (req, res) => {
   try {
     const receipt = await Receipt.findById(req.params.id).select(
-      "pdfUrl receipt_no projectname seniority_no",
+      "pdfUrl receipt_no projectname membershipid seniority_no",
     );
 
     if (!receipt) {
@@ -432,7 +533,7 @@ exports.downloadReceiptPDF = async (req, res) => {
       /[^a-zA-Z0-9]/g,
       "_",
     );
-    const seniorityPart = (receipt.seniority_no || "").replace(
+    const idPart = (receipt.membershipid || receipt.seniority_no || "").replace(
       /[^a-zA-Z0-9]/g,
       "_",
     );
@@ -440,7 +541,7 @@ exports.downloadReceiptPDF = async (req, res) => {
       /[^a-zA-Z0-9]/g,
       "_",
     );
-    const filename = `${projectPart}_${seniorityPart}.pdf`;
+    const filename = `${projectPart}_${idPart}_${receiptPart}.pdf`;
 
     // Set response headers so the browser treats it as a file download
     res.setHeader("Content-Type", "application/pdf");

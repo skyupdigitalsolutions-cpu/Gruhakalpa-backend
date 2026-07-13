@@ -11,6 +11,10 @@ const memberSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    membership_receipt_no: {
+      type: String,
+      default: null,
+    },
     aadharnumber: {
       type: Number,
       required: true,
@@ -83,6 +87,18 @@ const memberSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+  },
+);
+
+// Enforce uniqueness of membership_receipt_no at the DB level.
+// partialFilterExpression limits the unique constraint to documents where the
+// field is an actual string, so members without a receipt number (null / absent)
+// are excluded and never collide with one another.
+memberSchema.index(
+  { membership_receipt_no: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { membership_receipt_no: { $type: "string" } },
   },
 );
 

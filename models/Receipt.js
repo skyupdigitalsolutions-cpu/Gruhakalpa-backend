@@ -9,6 +9,7 @@ const receiptSchema = new mongoose.Schema(
     receipt_no: {
       type: String,
       required: true,
+      unique: true,
     },
     name: {
       type: String,
@@ -18,7 +19,14 @@ const receiptSchema = new mongoose.Schema(
       type: String,
       required: false, // Optional field for user email
     },
-    projectname: String,
+    projectname: String, // "NA" for Fixed Deposit / Recurring Deposit receipts
+    // "site" | "fixed_deposit" | "recurring_deposit"
+    // Lets you filter/report deposit receipts separately from site-project ones.
+    paymentcategory: {
+      type: String,
+      enum: ["site", "fixed_deposit", "recurring_deposit"],
+      default: "site",
+    },
     date: {
       type: Date,
       required: true,
@@ -39,7 +47,7 @@ const receiptSchema = new mongoose.Schema(
     paymentmode: String,
     paymenttype: String,
     transactionid: String,
-    sitedimension: String, // ✅ Field for site dimensions
+    sitedimension: String, // ✅ Field for site dimensions (blank for deposits)
     created_by: String,
     bank: String,
     seniority_no: String,
@@ -49,7 +57,7 @@ const receiptSchema = new mongoose.Schema(
     pdfUrl: { type: String, default: null }, // Cloudinary URL of the generated receipt PDF
 
     // Exact split of this receipt's amount across payment buckets.
-    // bucket: internal key ("Down Payment" | "Installment N" | fee name)
+    // bucket: internal key ("Down Payment" | "Installment N" | fee name | deposit label)
     // label:  what was printed on the receipt (e.g. "Booking Advance" while DP incomplete)
     // amount: rupees allocated to that bucket in THIS receipt
     allocations: [

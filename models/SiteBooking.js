@@ -24,12 +24,20 @@ const siteBookingSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // NEW: scheduled due date for the down payment. Set from the booking form.
+    // When absent (legacy bookings), the schedule engine falls back to the
+    // booking date.
+    downPaymentDate: { type: Date },
     // NEW: full installment schedule (supports 14 installments).
-    // Each entry: { label: "Installment 1", amount: 150000 }
+    // Each entry: { label: "Installment 1", amount: 150000, dueDate: <Date> }
+    // dueDate is the scheduled/expected payment date for that installment.
+    // When absent (legacy bookings), the schedule engine derives it monthly
+    // from the booking date.
     installments: [
       {
         label: { type: String },
         amount: { type: Number, default: 0 },
+        dueDate: { type: Date },
       },
     ],
     // Legacy fields kept for backward-compatibility with older records.
@@ -57,18 +65,8 @@ const siteBookingSchema = new mongoose.Schema(
     status: { type: String, default: "active" },
     cancelled: { type: Boolean, default: false },
     cancellationPdfUrl: { type: String },
+    cancellationPenalty: { type: Number, default: 0 },
     cancelledAt: { type: Date },
-    // Payment-reminder automation: records each reminder already sent so the
-    // same one is never sent twice. Keyed by installment + milestone.
-    remindersSent: [
-      {
-        key: { type: String },
-        sentAt: { type: Date, default: Date.now },
-        type: { type: String }, // "reminder" | "overdue"
-        pendingAmount: { type: Number },
-        channels: [{ type: String }], // e.g. ["whatsapp:ok", "email:ok"]
-      },
-    ],
   },
   {
     timestamps: true,

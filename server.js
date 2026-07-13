@@ -13,28 +13,25 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const siteBookingRoutes = require("./routes/siteBookingRoutes");
 const receiptRoutes = require("./routes/receiptRoutes");
 const superAdminRoutes = require("./routes/SuperadminRoutes");
-const reminderRoutes = require("./routes/reminderRoutes");
-const { startReminderScheduler } = require("./jobs/reminderScheduler");
+const inwardOutwardRoutes = require("./routes/inwardOutwardRoutes");
+const paymentReminderRoutes = require("./routes/paymentReminderRoutes");
+const bankStatementRoutes = require("./routes/bankStatementRoutes");
+const { startReminderScheduler } = require("./utils/reminderScheduler");
+const depositRoutes = require("./routes/depositRoutes");
 
 const app = express();
 connectDB();
 
-// Start the daily payment-reminder scheduler (WhatsApp + email)
-startReminderScheduler();
-
-// Allowed origins come from the CORS_ORIGINS env var (comma-separated).
-// Falls back to localhost + the Cloudflare frontend for convenience.
-const allowedOrigins = (
-  process.env.CORS_ORIGINS ||
-  "http://localhost:3000,https://gruhakalpa-frontend.pages.dev"
-)
-  .split(",")
-  .map((o) => o.trim())
-  .filter(Boolean);
-
 app.use(
   cors({
-    origin: allowedOrigins,
+    // origin: [
+    //   "https://navanagara-project-2.onrender.com",
+    //   "https://www.navanagarahousebuildingsociety.com",
+    //   "https://navanagarahousebuildingsociety.com",
+    //   "http://3.104.54.57",
+    //   "http://navanagarahousebuildingsociety.com.s3-website-ap-southeast-2.amazonaws.com",
+    // ],
+    origin: ["http://localhost:3000", "http://localhost:3002"],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -56,7 +53,10 @@ app.use("/", paymentRoutes);
 app.use("/", siteBookingRoutes);
 app.use("/", receiptRoutes);
 app.use("/", superAdminRoutes);
-app.use("/", reminderRoutes);
+app.use("/", inwardOutwardRoutes);
+app.use("/", paymentReminderRoutes);
+app.use("/", bankStatementRoutes);
+app.use("/", depositRoutes);
 
 app.get("/test", (req, res) => {
   res.json({
@@ -86,17 +86,20 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
   console.log(
-    `📧 Brevo API Key: ${process.env.BREVO_API_KEY ? "✅ Configured" : "❌ NOT CONFIGURED"}`,
+    `Brevo API Key: ${process.env.BREVO_API_KEY ? "✅ Configured" : "❌ NOT CONFIGURED"}`,
   );
   console.log(
-    `📧 Sender Email: ${process.env.SENDER_EMAIL || "❌ NOT CONFIGURED"}`,
+    `Sender Email: ${process.env.SENDER_EMAIL || "❌ NOT CONFIGURED"}`,
   );
   console.log(
-    `📧 Company Email: ${process.env.COMPANY_EMAIL || "❌ NOT CONFIGURED"}`,
+    `Company Email: ${process.env.COMPANY_EMAIL || "❌ NOT CONFIGURED"}`,
   );
   console.log(
-    `💾 Database: ${process.env.MONGODB_URI ? "Connected" : "Check connection"}`,
+    `Database: ${process.env.MONGODB_URI ? "Connected" : "Check connection"}`,
   );
+
+  // Start the payment-reminder scheduler (runs auto reminders when enabled)
+  startReminderScheduler();
 });

@@ -1,230 +1,208 @@
-/**
- * paymentSchedule.js
- *
- * Pure, side-effect-free logic for the payment-reminder automation.
- * No database or network calls here — just date/amount math — so it is easy to test.
- *
- * Plans:
- *   - "installments": Down Payment + 14 installments. Each installment has a
- *      SEQUENTIAL 3-month (90-day) window. Installment N's window starts
- *      (N-1) * 90 days after the booking date.
- *   - "full": the whole amount is due within a single 90-day window from booking.
- *
- * Reminder schedule inside each window (days measured from the window start):
- *   - Days 0..59  -> silent (first 2 months)
- *   - Day 60      -> reminder 1  (month 3, day 1)
- *   - Day 75      -> reminder 2  (+15 days)
- *   - Day 83      -> reminder 3  (7 days before due date)
- *   - Day 89      -> reminder 4  (1 day before due date)
- *   - Day 90      -> reminder 5  (due date)
- *   - After day 90, every 7 days -> overdue reminders until the amount is paid
- */
+// ─────────────────────────────────────────────────────────────────────────
+// Payment schedule engine
+//
+// A client's payment PLAN lives on their SiteBooking (downpayment + an
+// installments[] array of { label, amount, dueDate? }).
+//
+// Due dates: if the booking stores an explicit dueDate (down payment ->
+// downPaymentDate, installment -> installments[i].dueDate) we USE it. When it
+// is absent (legacy bookings created before dates were captured) we DERIVE it:
+//   - Down Payment  -> due on the booking date
+//   - Installment N  -> due = bookingDate + (N * intervalMonths) months
+//   - "full" plan    -> single "Full Payment" bucket due on the booking date
+//
+// What a client has PAID lives across their Receipts. We waterfall the total
+// paid across the ordered buckets (down payment first, then each installment)
+// — the same mental model as the receipt allocator — so partial payments fill
+// earlier buckets first. This is robust even if a receipt's stored allocations
+// don't label-match the schedule exactly. 
+// ─────────────────────────────────────────────────────────────────────────
 
-const WINDOW_DAYS = 90; // 3 months per installment window
-const PRE_DUE_OFFSETS = [60, 75, 83, 89, 90]; // reminder days from window start
-const OVERDUE_INTERVAL_DAYS = 7; // after due date, remind weekly
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-/** Add whole days to a date, returning a new Date. */
-function addDays(date, days) {
-  return new Date(date.getTime() + days * MS_PER_DAY);
-}
-
-/** Whole days between two dates (b - a), floored. */
-function daysBetween(a, b) {
-  return Math.floor((b.getTime() - a.getTime()) / MS_PER_DAY);
-}
-
-/** Format a date as DD-MM-YYYY for messages. */
-function formatDate(date) {
+// Add N calendar months to a date, clamping the day (e.g. Jan 31 + 1mo = Feb 28/29)
+const addMonths = (date, months) => {
   const d = new Date(date);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}-${mm}-${yyyy}`;
-}
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + months);
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
+  return d;
+};
 
-/**
- * Build the ordered list of obligations for a booking.
- * Down payment (if any) comes first, then each installment in order.
- * For a "full" plan there is a single obligation for the total amount.
- *
- * Each obligation: { label, amount, windowStart, dueDate }
- */
-function buildObligations(booking) {
-  const bookingDate = new Date(booking.date);
-  const plan = booking.paymentplan === "full" ? "full" : "installments";
+const startOfDay = (date) => {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
 
-  if (plan === "full") {
-    return [
-      {
-        label: "Full Payment",
-        amount: Number(booking.totalamount) || 0,
-        windowStart: bookingDate,
-        dueDate: addDays(bookingDate, WINDOW_DAYS),
-      },
-    ];
-  }
+// Build the ordered list of buckets (label, amount, dueDate) for one booking.
+const buildBuckets = (booking, intervalMonths) => {
+  const buckets = [];
+  const bookingDate = booking.date ? new Date(booking.date) : new Date();
+  const interval = Number(intervalMonths) > 0 ? Number(intervalMonths) : 1;
 
-  const obligations = [];
-
-  // Down payment is treated as due at booking (window 0). It is included so the
-  // paid-amount allocation is correct, but it does not drive the 3-month timeline.
-  const downpayment = Number(booking.downpayment) || 0;
-  if (downpayment > 0) {
-    obligations.push({
-      label: "Down Payment",
-      amount: downpayment,
-      windowStart: bookingDate,
-      dueDate: bookingDate,
-      isDownPayment: true,
-    });
-  }
-
-  // Installments: sequential 90-day windows.
+  const isFull = booking.paymentplan === "full";
   const installments = Array.isArray(booking.installments)
     ? booking.installments
     : [];
-  installments.forEach((inst, i) => {
-    const windowStart = addDays(bookingDate, i * WINDOW_DAYS);
-    obligations.push({
-      label: inst.label || `Installment ${i + 1}`,
-      amount: Number(inst.amount) || 0,
-      windowStart,
-      dueDate: addDays(windowStart, WINDOW_DAYS),
+
+  if (isFull && installments.length === 0) {
+    buckets.push({
+      label: "Full Payment",
+      amount: Number(booking.totalamount || 0),
+      dueDate: booking.downPaymentDate
+        ? new Date(booking.downPaymentDate)
+        : bookingDate,
+    });
+    return buckets;
+  }
+
+  const downpayment = Number(booking.downpayment || 0);
+  if (downpayment > 0) {
+    buckets.push({
+      label: "Down Payment",
+      amount: downpayment,
+      // Use the stored down-payment date when present, else the booking date.
+      dueDate: booking.downPaymentDate
+        ? new Date(booking.downPaymentDate)
+        : bookingDate,
+    });
+  }
+
+  installments.forEach((it, i) => {
+    const amount = Number(it.amount || 0);
+    if (amount <= 0) return;
+    buckets.push({
+      label: it.label || `Installment ${i + 1}`,
+      amount,
+      // Use the stored installment due date when present, else derive monthly.
+      dueDate: it.dueDate
+        ? new Date(it.dueDate)
+        : addMonths(bookingDate, (i + 1) * interval),
     });
   });
 
-  return obligations;
-}
+  return buckets;
+};
 
-/**
- * Given the obligations (in order) and the total amount paid so far,
- * find the earliest obligation that is not yet fully covered.
- * Payments are applied to obligations in order (down payment first, then
- * installment 1, 2, ...).
- *
- * Returns null if everything is fully paid, otherwise:
- *   { index, obligation, pendingAmount, totalOutstanding }
- */
-function findCurrentObligation(obligations, totalPaid) {
-  let remainingPaid = totalPaid;
-  let totalOutstanding = 0;
-  let current = null;
+// Sum of non-cancelled receipt payments for a member.
+const totalPaidForMember = (receipts) =>
+  (receipts || [])
+    .filter((r) => !r.cancelled)
+    .reduce((sum, r) => sum + Number(r.amountpaid || 0), 0);
 
-  for (let i = 0; i < obligations.length; i++) {
-    const ob = obligations[i];
-    const coveredByPaid = Math.min(remainingPaid, ob.amount);
-    const pending = ob.amount - coveredByPaid;
-    remainingPaid -= coveredByPaid;
+const classify = (bucket, today, windowDays) => {
+  const outstanding = bucket.outstanding;
+  if (outstanding <= 0) return "paid";
+  const due = startOfDay(bucket.dueDate);
+  if (due < today) return "overdue";
+  const windowEnd = new Date(today);
+  windowEnd.setDate(windowEnd.getDate() + Number(windowDays || 0));
+  if (due <= windowEnd) return "due_soon";
+  return "upcoming";
+};
 
-    if (pending > 0) {
-      totalOutstanding += pending;
-      if (current === null) {
-        current = { index: i, obligation: ob, pendingAmount: pending };
-      }
-    }
+// Build the full schedule + summary for a single booking.
+const buildScheduleForBooking = (booking, receipts, settings) => {
+  const intervalMonths = settings?.intervalMonths || 1;
+  const windowDays = settings?.reminderWindowDays ?? 7;
+  const today = startOfDay(new Date());
+
+  const buckets = buildBuckets(booking, intervalMonths);
+  let paidPool = totalPaidForMember(receipts);
+  const totalPaid = paidPool;
+
+  // Waterfall the paid pool across buckets in order.
+  for (const b of buckets) {
+    const applied = Math.min(paidPool, b.amount);
+    b.paid = applied;
+    b.outstanding = Math.max(b.amount - applied, 0);
+    paidPool -= applied;
+    b.status = classify(b, today, windowDays);
+    // Whole days from today to due date (negative = overdue).
+    b.daysUntilDue = Math.round(
+      (startOfDay(b.dueDate) - today) / (24 * 60 * 60 * 1000),
+    );
   }
 
-  if (current === null) return null; // fully paid
-  current.totalOutstanding = totalOutstanding;
-  return current;
-}
+  const totalDue = buckets.reduce((s, b) => s + b.amount, 0);
+  const totalOutstanding = buckets.reduce((s, b) => s + b.outstanding, 0);
+  const overdueAmount = buckets
+    .filter((b) => b.status === "overdue")
+    .reduce((s, b) => s + b.outstanding, 0);
 
-/**
- * Decide which reminder (if any) is due for the current obligation as of `today`.
- * Skips down-payment obligations (they have no 3-month timeline of their own).
- *
- * `alreadySent` is a Set of reminder keys already sent for this booking, used to
- * avoid duplicates and to prevent sending several catch-up reminders at once.
- *
- * Returns null if nothing is due, otherwise:
- *   { key, type: "reminder" | "overdue", dueDate }
- */
-function getDueReminder(current, today, alreadySent) {
-  if (!current || current.obligation.isDownPayment) return null;
+  // Next actionable bucket: earliest unpaid one (overdue counts first).
+  const unpaid = buckets.filter((b) => b.outstanding > 0);
+  unpaid.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+  const nextDue = unpaid[0] || null;
 
-  const { index, obligation } = current;
-  const windowStart = new Date(obligation.windowStart);
-  const dueDate = new Date(obligation.dueDate);
-  const dayNo = daysBetween(windowStart, today);
-
-  if (dayNo < PRE_DUE_OFFSETS[0]) return null; // still in the silent period
-
-  // Collect every milestone whose scheduled day is on or before today.
-  const dueMilestones = [];
-
-  // Pre-due / due-date milestones
-  PRE_DUE_OFFSETS.forEach((offset) => {
-    if (dayNo >= offset) {
-      dueMilestones.push({
-        key: `inst-${index}-d${offset}`,
-        type: offset === WINDOW_DAYS ? "overdue" : "reminder",
-        dueDate,
-      });
-    }
-  });
-
-  // Overdue weekly milestones after the due date
-  if (dayNo > WINDOW_DAYS) {
-    const weeksOverdue = Math.floor((dayNo - WINDOW_DAYS) / OVERDUE_INTERVAL_DAYS);
-    for (let w = 1; w <= weeksOverdue; w++) {
-      dueMilestones.push({
-        key: `inst-${index}-overdue-w${w}`,
-        type: "overdue",
-        dueDate,
-      });
-    }
-  }
-
-  // Pick the latest milestone that has NOT already been sent. Sending only the
-  // most recent one prevents a burst of catch-up messages if the job missed days.
-  for (let i = dueMilestones.length - 1; i >= 0; i--) {
-    if (!alreadySent.has(dueMilestones[i].key)) {
-      return dueMilestones[i];
-    }
-  }
-
-  return null;
-}
-
-/**
- * Top-level helper: given a booking, the total paid, the set of already-sent
- * reminder keys, and today's date, return the reminder to send (or null) plus
- * the data needed to fill the message templates.
- */
-function evaluateBooking(booking, totalPaid, alreadySentKeys, today = new Date()) {
-  const obligations = buildObligations(booking);
-  const current = findCurrentObligation(obligations, totalPaid);
-  if (!current) return null; // fully paid — nothing to do
-
-  const alreadySent = new Set(alreadySentKeys || []);
-  const due = getDueReminder(current, today, alreadySent);
-  if (!due) return null;
+  // A client is "overdue" if any bucket is overdue; else "due_soon" if any is.
+  let overallStatus = "paid";
+  if (buckets.some((b) => b.status === "overdue")) overallStatus = "overdue";
+  else if (buckets.some((b) => b.status === "due_soon"))
+    overallStatus = "due_soon";
+  else if (buckets.some((b) => b.status === "upcoming"))
+    overallStatus = "upcoming";
 
   return {
-    reminderKey: due.key,
-    type: due.type, // "reminder" or "overdue"
-    name: booking.name,
-    membershipId: booking.membership_id,
-    projectName: booking.projectname || "your site booking",
-    installmentLabel: current.obligation.label,
-    pendingAmount: Math.round(current.pendingAmount),
-    totalOutstanding: Math.round(current.totalOutstanding),
-    dueDate: due.dueDate,
-    dueDateFormatted: formatDate(due.dueDate),
+    buckets,
+    totalDue,
+    totalPaid,
+    totalOutstanding,
+    overdueAmount,
+    nextDue,
+    overallStatus,
   };
-}
+};
+
+// Build one summary row per client across all bookings.
+// members: array of Member docs (for email/mobile lookup)
+// bookings: array of SiteBooking docs
+// receiptsByMember: Map<membership_id, Receipt[]>
+const computeClientRows = (bookings, receiptsByMember, membersById, settings) => {
+  const rows = [];
+
+  for (const booking of bookings || []) {
+    if (booking.cancelled) continue;
+    const mid = booking.membership_id;
+    if (!mid) continue;
+
+    const receipts = receiptsByMember.get(mid) || [];
+    const member = membersById.get(mid) || {};
+    const schedule = buildScheduleForBooking(booking, receipts, settings);
+
+    rows.push({
+      membership_id: mid,
+      name: booking.name || member.name || "",
+      mobile: member.mobile || booking.mobilenumber || null,
+      email: member.email || "",
+      projectname: booking.projectname || "",
+      sitedimension: booking.sitedimension || "",
+      bookingDate: booking.date,
+      totalDue: schedule.totalDue,
+      totalPaid: schedule.totalPaid,
+      totalOutstanding: schedule.totalOutstanding,
+      overdueAmount: schedule.overdueAmount,
+      overallStatus: schedule.overallStatus,
+      nextDue: schedule.nextDue
+        ? {
+            label: schedule.nextDue.label,
+            amount: schedule.nextDue.amount,
+            outstanding: schedule.nextDue.outstanding,
+            dueDate: schedule.nextDue.dueDate,
+            status: schedule.nextDue.status,
+            daysUntilDue: schedule.nextDue.daysUntilDue,
+          }
+        : null,
+    });
+  }
+
+  return rows;
+};
 
 module.exports = {
-  WINDOW_DAYS,
-  PRE_DUE_OFFSETS,
-  OVERDUE_INTERVAL_DAYS,
-  addDays,
-  daysBetween,
-  formatDate,
-  buildObligations,
-  findCurrentObligation,
-  getDueReminder,
-  evaluateBooking,
+  addMonths,
+  buildBuckets,
+  buildScheduleForBooking,
+  computeClientRows,
 };

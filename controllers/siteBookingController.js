@@ -8,6 +8,33 @@ const safeInt = (value) => {
   return isNaN(parsed) ? undefined : parsed;
 };
 
+// Normalise a mobile number to a comparable Number (strips spaces, +91, etc.)
+const normaliseMobile = (value) => {
+  if (value === undefined || value === null) return undefined;
+  const digits = String(value).replace(/\D/g, "").slice(-10); // keep last 10 digits
+  if (!digits) return undefined;
+  const parsed = parseInt(digits, 10);
+  return isNaN(parsed) ? undefined : parsed;
+};
+
+// Map a set of due dates onto an installments array. dueDates may arrive as:
+//   - an array aligned by index to installments, OR
+//   - already embedded on each installment entry ({ label, amount, dueDate }).
+const buildInstallments = (installments, dueDates) => {
+  if (!Array.isArray(installments)) return [];
+  return installments.map((it, i) => {
+    const dd =
+      (it && it.dueDate) ||
+      (Array.isArray(dueDates) ? dueDates[i] : undefined) ||
+      null;
+    return {
+      label: String((it && it.label) || `Installment ${i + 1}`),
+      amount: parseInt(it && it.amount) || 0,
+      dueDate: dd ? new Date(dd) : undefined,
+    };
+  });
+};
+
 exports.updateSiteBookingById = async (req, res) => {
   try {
     const {
@@ -20,6 +47,10 @@ exports.updateSiteBookingById = async (req, res) => {
       date,
       designation,
       nominees,
+      downpayment,
+      downPaymentDate,
+      installments,
+      installmentDueDates,
     } = req.body;
 
     // ── 1. Fetch the ORIGINAL booking so we know the old membership_id ────────
@@ -35,12 +66,25 @@ exports.updateSiteBookingById = async (req, res) => {
     const updateFields = {};
     if (membership_id !== undefined) updateFields.membership_id = membership_id;
     if (name !== undefined) updateFields.name = name;
-    if (mobilenumber !=undefined) updateFields.mobilenumber = mobilenumber;
+    if (mobilenumber !== undefined) updateFields.mobilenumber = mobilenumber;
     if (projectname !== undefined) updateFields.projectname = projectname;
     if (sitedimension !== undefined) updateFields.sitedimension = sitedimension;
     if (designation !== undefined) updateFields.designation = designation;
     if (nominees !== undefined) updateFields.nominees = nominees;
     if (date !== undefined) updateFields.date = new Date(date);
+    if (downpayment !== undefined) {
+      const dp = parseInt(downpayment);
+      if (!isNaN(dp)) updateFields.downpayment = dp;
+    }
+    if (downPaymentDate !== undefined)
+      updateFields.downPaymentDate = downPaymentDate
+        ? new Date(downPaymentDate)
+        : undefined;
+    if (installments !== undefined)
+      updateFields.installments = buildInstallments(
+        installments,
+        installmentDueDates,
+      );
     if (totalamount !== undefined) {
       const parsed = parseFloat(totalamount);
       if (!isNaN(parsed)) updateFields.totalamount = parsed;
@@ -88,13 +132,11 @@ exports.updateSiteBookingById = async (req, res) => {
     });
   } catch (error) {
     console.error("Update site booking error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Error updating site booking",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Error updating site booking",
+      error: error.message,
+    });
   }
 };
 
@@ -109,26 +151,47 @@ exports.createSiteBooking = async (req, res) => {
 
     const memberDoc = await Member.findOne({ membership_id: membership_id });
     if (!memberDoc) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "Member not found for this seniority number",
-        });
-    }
-
-    // Duplicate sitebooking check
-    const existingBooking = await SiteBooking.findOne({
-      membership_id: membership_id,
-    });
-    if (existingBooking) {
-      return res.status(400).json({
+      return res.status(404).json({
         success: false,
-        message: `Site booking already exists for seniority number ${membership_id}. Duplicate site booking is not allowed.`,
+        message: "Member not found for this seniority number",
       });
     }
 
-    const mobilenumber = memberDoc.mobilenumber || memberDoc.mobile || req.body.mobilenumber;
+    // Resolve the client's mobile number (member record is authoritative,
+    // fall back to whatever the form submitted).
+    const mobilenumber = normaliseMobile(
+      memberDoc.mobilenumber || memberDoc.mobile || req.body.mobilenumber,
+    );
+
+    // ── Duplicate check by MOBILE NUMBER ─────────────────────────────────────
+    // One client (identified by mobile) may only hold one active site booking.
+    // Cancelled bookings are ignored so a client can re-book after cancelling.
+    if (mobilenumber !== undefined) {
+      const existingByMobile = await SiteBooking.findOne({
+        mobilenumber,
+        cancelled: { $ne: true },
+      });
+      if (existingByMobile) {
+        return res.status(409).json({
+          success: false,
+          code: "DUPLICATE_MOBILE",
+          message: `Site booking already exists for this user (mobile ${mobilenumber}) under membership ${existingByMobile.membership_id}.`,
+        });
+      }
+    }
+
+    // ── Secondary safety net: duplicate by membership id ─────────────────────
+    const existingByMembership = await SiteBooking.findOne({
+      membership_id: membership_id,
+      cancelled: { $ne: true },
+    });
+    if (existingByMembership) {
+      return res.status(409).json({
+        success: false,
+        code: "DUPLICATE_MEMBERSHIP",
+        message: `Site booking already exists for this user (membership ${membership_id}).`,
+      });
+    }
 
     const siteBooking = new SiteBooking({
       membership_id: req.body.membership_id,
@@ -139,13 +202,17 @@ exports.createSiteBooking = async (req, res) => {
       sitedimension: req.body.sitedimension,
       totalamount: parseInt(req.body.totalamount),
       downpayment: parseInt(req.body.downpayment) || 0,
-      // NEW: accept the full installment schedule (array of { label, amount }).
-      installments: Array.isArray(req.body.installments)
-        ? req.body.installments.map((it) => ({
-            label: String(it.label || ""),
-            amount: parseInt(it.amount) || 0,
-          }))
-        : [],
+      // NEW: scheduled due date for the down payment.
+      downPaymentDate: req.body.downPaymentDate
+        ? new Date(req.body.downPaymentDate)
+        : undefined,
+      // NEW: accept the full installment schedule with per-installment due
+      // dates (array of { label, amount, dueDate }). Also accepts a parallel
+      // installmentDueDates[] array aligned by index for flexibility.
+      installments: buildInstallments(
+        req.body.installments,
+        req.body.installmentDueDates,
+      ),
       paymentplan: req.body.paymentplan === "full" ? "full" : "installments",
       designation: req.body.designation,
       nominees: req.body.nominees || [],
@@ -184,7 +251,6 @@ exports.updateSiteBooking = async (req, res) => {
       totalamount: parseInt(req.body.totalamount),
       bookingamount: safeInt(req.body.bookingamount),
       downpayment: safeInt(req.body.downpayment),
-      installments: safeInt(req.body.installments),
       paymentmode: req.body.paymentmode,
     };
 
@@ -203,6 +269,7 @@ exports.updateSiteBooking = async (req, res) => {
 exports.cancelSiteBooking = async (req, res) => {
   try {
     const { bookingId } = req.body;
+    const penaltyAmount = Number(req.body.penaltyAmount) || 0;
 
     if (!req.file) {
       return res
@@ -244,6 +311,7 @@ exports.cancelSiteBooking = async (req, res) => {
         $set: {
           cancelled: true,
           cancellationPdfUrl: result.secure_url,
+          cancellationPenalty: penaltyAmount,
           cancelledAt: new Date(),
         },
       },
@@ -264,6 +332,7 @@ exports.cancelSiteBooking = async (req, res) => {
       success: true,
       message: "Site booking cancelled successfully!",
       cancellationPdfUrl: result.secure_url,
+      cancellationPenalty: penaltyAmount,
     });
   } catch (error) {
     console.error("Cancel site booking error:", error);
