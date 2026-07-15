@@ -87,8 +87,20 @@ function daysBetween(a, b) {
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// FD maturity is fixed at 367 days from the (latest) amount-paid date.
+// Legacy constant kept for backward compatibility. FD maturity is no longer a
+// fixed number of days — see fdMaturityDate below.
 const FD_TENURE_DAYS = 367;
+
+// FD maturity = issue date + tenure (calendar months) + a fixed grace of 2 days.
+// Using calendar-month math means the span is automatically leap-year aware:
+//   12 months in a normal year  → 365 days, +2 = 367 days
+//   12 months across a Feb-29   → 366 days, +2 = 368 days
+//   24 months                   → ~730/731 days, +2, etc.
+// The exact day count is whatever daysBetween(issueDate, maturityDate) returns.
+function fdMaturityDate(issueDate, tenureMonths, graceDays = 2) {
+  const base = addMonths(issueDate, Number(tenureMonths) || 12);
+  return addDays(base, graceDays);
+}
 
 // Fixed Deposit — simple interest on the principal for the FD period.
 //   interest = principal × rate% × (days / 365)
@@ -148,6 +160,7 @@ module.exports = {
   daysBetween,
   round2,
   FD_TENURE_DAYS,
+  fdMaturityDate,
   computeFDInterest,
   computeRDInterest,
   nextDepositNumber,

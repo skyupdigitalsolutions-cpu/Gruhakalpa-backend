@@ -463,7 +463,15 @@ Navanagara Admin System`;
 // Get all receipts
 exports.getAllReceipts = async (req, res) => {
   try {
-    const receipts = await Receipt.find({}).sort({ createdAt: -1 });
+    // Optional filters (used e.g. by the Fixed Deposit form to pull only a
+    // given member's fixed_deposit receipts). No params = all receipts.
+    const { membershipid, paymentcategory, projectname } = req.query;
+    const filter = {};
+    if (membershipid) filter.membershipid = membershipid;
+    if (paymentcategory) filter.paymentcategory = paymentcategory;
+    if (projectname) filter.projectname = projectname;
+
+    const receipts = await Receipt.find(filter).sort({ createdAt: -1 });
     res.status(200).json({
       success: true,
       data: receipts,
