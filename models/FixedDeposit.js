@@ -48,6 +48,15 @@ const fixedDepositSchema = new mongoose.Schema(
     tenureMonths: { type: Number, default: 12 }, // informational
     maturityDate: { type: Date }, // auto = amountPaidDate + 367 days
 
+    // The printed FD Certificate (letterhead layout matching the physical FDR
+    // card) generated from the admin/superadmin "FD Certificate" form. Stored
+    // here so it can be re-downloaded/viewed later without regenerating it.
+    certificate: {
+      fdrNumber: { type: String, default: "" }, // printed "FDR No." (may differ from fdrNo)
+      pdfUrl: { type: String, default: null },
+      generatedAt: { type: Date, default: null },
+    },
+
     interestRate: { type: Number, default: 0 }, // custom % set by admin
     interestAmount: { type: Number, default: 0 }, // computed
     maturityAmount: { type: Number, default: 0 }, // principal + interest

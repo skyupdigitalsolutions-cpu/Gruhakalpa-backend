@@ -9,6 +9,8 @@ router.get("/fixed-deposits", fd.getAllFixedDeposits);
 router.get("/fixed-deposits/:id", fd.getFixedDepositById);
 router.put("/fixed-deposits/:id", fd.updateFixedDeposit);
 router.put("/fixed-deposits/:id/cancel", fd.cancelFixedDeposit);
+router.put("/fixed-deposits/:id/certificate", fd.saveCertificate);
+router.get("/fixed-deposits/:id/certificate/download", fd.downloadCertificate);
 
 // ── Recurring Deposit ──
 router.post("/recurring-deposit", rd.createRecurringDeposit);

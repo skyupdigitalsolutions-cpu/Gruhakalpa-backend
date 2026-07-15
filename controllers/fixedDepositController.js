@@ -1,6 +1,7 @@
 const FixedDeposit = require("../models/FixedDeposit");
 const Member = require("../models/Member");
 const Receipt = require("../models/Receipt");
+const cloudinary = require("../cloudinaryConfig");
 const {
   numberToWordsIndian,
   addDays,
@@ -282,6 +283,91 @@ exports.updateFixedDeposit = async (req, res) => {
   } catch (error) {
     console.error("updateFixedDeposit error:", error);
     res.status(500).json({ success: false, message: "Error updating fixed deposit" });
+  }
+};
+
+// Store the generated FD Certificate PDF (base64 from the frontend) against
+// this Fixed Deposit, uploading it to Cloudinary the same way receipt PDFs
+// are stored — so it can be viewed/downloaded again later from the FD list.
+exports.saveCertificate = async (req, res) => {
+  try {
+    const fd = await FixedDeposit.findById(req.params.id);
+    if (!fd) return res.status(404).json({ success: false, message: "Not found" });
+
+    const { pdfBase64, fdrNumber } = req.body;
+    if (!pdfBase64) {
+      return res.status(400).json({ success: false, message: "pdfBase64 is required" });
+    }
+
+    const pdfBuffer = Buffer.from(pdfBase64, "base64");
+    const publicId = `FDCertificate_${(fdrNumber || fd.fdrNo || fd._id).toString().replace(/[^a-zA-Z0-9]/g, "_")}`;
+
+    const uploadResult = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: "fd-certificates",
+          resource_type: "raw",
+          format: "pdf",
+          public_id: publicId,
+          type: "upload",
+          access_mode: "public",
+        },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        },
+      );
+      stream.end(pdfBuffer);
+    });
+
+    fd.certificate = {
+      fdrNumber: fdrNumber || fd.fdrNo,
+      pdfUrl: uploadResult.secure_url,
+      generatedAt: new Date(),
+    };
+    await fd.save();
+
+    res.status(200).json({ success: true, message: "Certificate saved", data: fd });
+  } catch (error) {
+    console.error("saveCertificate error:", error);
+    res.status(500).json({ success: false, message: "Error saving certificate" });
+  }
+};
+
+// Proxy-stream the certificate PDF from Cloudinary (avoids 401 issues), same
+// pattern as receiptController.downloadReceiptPDF.
+exports.downloadCertificate = async (req, res) => {
+  try {
+    const fd = await FixedDeposit.findById(req.params.id).select("certificate fdrNo");
+    if (!fd || !fd.certificate || !fd.certificate.pdfUrl) {
+      return res.status(404).json({ success: false, message: "Certificate not available" });
+    }
+
+    const https = require("https");
+    const http = require("http");
+    const filename = `FDCertificate_${(fd.fdrNo || "certificate").replace(/[^a-zA-Z0-9]/g, "_")}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+
+    const protocol = fd.certificate.pdfUrl.startsWith("https") ? https : http;
+    protocol
+      .get(fd.certificate.pdfUrl, (pdfStream) => {
+        if (pdfStream.statusCode === 200) {
+          pdfStream.pipe(res);
+        } else {
+          res.setHeader("Content-Type", "application/json");
+          res.setHeader("Content-Disposition", "");
+          res.json({ success: true, pdfUrl: fd.certificate.pdfUrl });
+        }
+      })
+      .on("error", () => {
+        res.status(500).json({ success: false, message: "Error streaming certificate" });
+      });
+  } catch (error) {
+    console.error("downloadCertificate error:", error);
+    res.status(500).json({ success: false, message: "Error fetching certificate" });
   }
 };
 
