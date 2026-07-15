@@ -87,20 +87,8 @@ function daysBetween(a, b) {
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// Legacy constant kept for backward compatibility. FD maturity is no longer a
-// fixed number of days — see fdMaturityDate below.
+// FD maturity is fixed at 367 days from the (latest) amount-paid date.
 const FD_TENURE_DAYS = 367;
-
-// FD maturity = issue date + tenure (calendar months) + a fixed grace of 2 days.
-// Using calendar-month math means the span is automatically leap-year aware:
-//   12 months in a normal year  → 365 days, +2 = 367 days
-//   12 months across a Feb-29   → 366 days, +2 = 368 days
-//   24 months                   → ~730/731 days, +2, etc.
-// The exact day count is whatever daysBetween(issueDate, maturityDate) returns.
-function fdMaturityDate(issueDate, tenureMonths, graceDays = 2) {
-  const base = addMonths(issueDate, Number(tenureMonths) || 12);
-  return addDays(base, graceDays);
-}
 
 // Fixed Deposit — simple interest on the principal for the FD period.
 //   interest = principal × rate% × (days / 365)
@@ -133,6 +121,72 @@ function computeRDInterest(totalPaid, ratePercent, monthsCompleted) {
   };
 }
 
+// Recurring Deposit — MONTHLY COMPOUNDING (running balance).
+// The member pays a fixed `monthlyAmount` at the start of each month; at the end
+// of every completed month the running balance earns one month's interest at the
+// monthly rate (annual% / 12), which is then added to the balance. So the first
+// payment starts earning interest only after the first month completes, and each
+// later payment compounds for the months that remain until maturity.
+//
+//   i = rate% / 12 / 100                 (monthly rate)
+//   month m: balance += P; interest = balance × i; balance += interest
+//
+// Returns totals plus a per-month schedule the form/list can render.
+function computeRDCompound(monthlyAmount, ratePercent, months) {
+  const P = round2(Number(monthlyAmount) || 0);
+  const r = Number(ratePercent) || 0;
+  const n = Math.max(0, Math.floor(Number(months) || 0));
+  const i = r / 1200;
+
+  let balance = 0;
+  const schedule = [];
+  for (let m = 1; m <= n; m++) {
+    balance = round2(balance + P); // deposit at the start of the month
+    const interest = round2(balance * i); // this month's interest
+    balance = round2(balance + interest); // compounded into the balance
+    schedule.push({ month: m, deposit: P, interest, balance });
+  }
+
+  const totalDeposit = round2(P * n);
+  const maturityAmount = round2(balance);
+  const interestAmount = round2(maturityAmount - totalDeposit);
+  return { totalDeposit, interestAmount, maturityAmount, schedule };
+}
+
+// Same monthly-compounding model, but driven by the ACTUAL recorded installments
+// (amounts may vary). Used to value an RD for the months paid so far — e.g. for
+// early closure. Returns totalPaid, accrued interest and accrued value to date.
+function computeRDCompoundSeries(installments, ratePercent) {
+  const r = Number(ratePercent) || 0;
+  const i = r / 1200;
+  const list = Array.isArray(installments) ? installments : [];
+
+  let balance = 0;
+  let deposited = 0;
+  const schedule = [];
+  list.forEach((inst, idx) => {
+    const amt = round2(Number(inst && inst.amount) || 0);
+    balance = round2(balance + amt);
+    deposited = round2(deposited + amt);
+    const interest = round2(balance * i);
+    balance = round2(balance + interest);
+    schedule.push({
+      month: idx + 1,
+      date: inst && inst.date ? inst.date : undefined,
+      deposit: amt,
+      interest,
+      balance,
+    });
+  });
+
+  return {
+    totalPaid: round2(deposited),
+    accruedInterest: round2(balance - deposited),
+    accruedValue: round2(balance),
+    schedule,
+  };
+}
+
 // Generate the next deposit number for a Model, e.g. FDR2026001 / RD2026001.
 // Finds the highest existing sequence for `${prefix}${year}` and adds 1.
 // (Low-volume admin flow — a find-max-and-increment is sufficient here.)
@@ -160,8 +214,9 @@ module.exports = {
   daysBetween,
   round2,
   FD_TENURE_DAYS,
-  fdMaturityDate,
   computeFDInterest,
   computeRDInterest,
+  computeRDCompound,
+  computeRDCompoundSeries,
   nextDepositNumber,
 };

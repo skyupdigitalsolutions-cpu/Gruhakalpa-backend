@@ -3,32 +3,46 @@ const Member = require("../models/Member");
 const {
   numberToWordsIndian,
   addMonths,
-  computeRDInterest,
+  computeRDCompound,
+  computeRDCompoundSeries,
   nextDepositNumber,
   round2,
 } = require("../utils/depositUtils");
 
-// Recompute totals, maturityDate, interest and words from the current
-// installments / monthly amount / rate / tenure.
+// Recompute totals, maturityDate, compound interest, schedule and words from the
+// current installments / monthly amount / rate / tenure.
+//
+// Interest is MONTHLY COMPOUNDING (see utils/depositUtils.computeRDCompound):
+//   - The "projection" fields assume every installment of the full tenure is
+//     paid: totalDeposit, interestAmount, maturityAmount, schedule.
+//   - The "accrued" fields value only the installments actually recorded so far:
+//     totalPaid, accruedInterest, accruedValue.
 function recomputeRD(doc) {
   const installments = Array.isArray(doc.installments) ? doc.installments : [];
   const monthsPaid = installments.length;
-  const totalPaid = round2(
-    installments.reduce((s, i) => s + (Number(i.amount) || 0), 0),
-  );
   const start = doc.amountPaidDate ? new Date(doc.amountPaidDate) : new Date(doc.date);
-  const maturityDate = addMonths(start, Number(doc.tenureMonths) || 12);
-  // Interest accrues on the total paid for the number of completed months.
-  const { interestAmount, maturityAmount } = computeRDInterest(
-    totalPaid,
-    doc.interestRate,
-    monthsPaid,
-  );
+  const tenure = Number(doc.tenureMonths) || 12;
+  const maturityDate = addMonths(start, tenure);
+
+  // Full-tenure projection (fixed monthly amount for every month of the term).
+  const projected = computeRDCompound(doc.monthlyAmount, doc.interestRate, tenure);
+
+  // Accrued value of what has actually been paid so far (amounts may vary).
+  const accrued = computeRDCompoundSeries(installments, doc.interestRate);
+
   doc.monthsPaid = monthsPaid;
-  doc.totalPaid = totalPaid;
+  doc.totalPaid = accrued.totalPaid;
   doc.maturityDate = maturityDate;
-  doc.interestAmount = interestAmount;
-  doc.maturityAmount = maturityAmount;
+  doc.compounding = "monthly";
+
+  doc.totalDeposit = projected.totalDeposit;
+  doc.interestAmount = projected.interestAmount;
+  doc.maturityAmount = projected.maturityAmount;
+  doc.schedule = projected.schedule;
+
+  doc.accruedInterest = accrued.accruedInterest;
+  doc.accruedValue = accrued.accruedValue;
+
   doc.sumInWords = numberToWordsIndian(doc.monthlyAmount);
   return doc;
 }
