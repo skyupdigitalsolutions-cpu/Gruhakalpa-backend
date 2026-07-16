@@ -52,7 +52,8 @@ exports.updateMemberById = async (req, res) => {
     });
   }
 };
-// Helper function to safely parse numbers
+// Helper function to safely parse numbers (for genuine quantities like fees /
+// application number — NOT for identifiers such as aadhaar / phone numbers).
 const safeParseInt = (value, fieldName) => {
   if (value === "" || value === null || value === undefined) {
     throw new Error(`${fieldName} is required`);
@@ -62,6 +63,16 @@ const safeParseInt = (value, fieldName) => {
     throw new Error(`${fieldName} must be a valid number`);
   }
   return parsed;
+};
+
+// Helper for required identifier fields (aadhaar, mobile). These are kept as
+// strings so the exact digits are preserved — parsing them to Number mangles
+// spaces, leading zeros, and 12-digit values (scientific notation).
+const safeString = (value, fieldName) => {
+  if (value === "" || value === null || value === undefined) {
+    throw new Error(`${fieldName} is required`);
+  }
+  return String(value).trim();
 };
 
 // Add new member
@@ -140,11 +151,14 @@ exports.addMember = async (req, res) => {
       applicationdoc: applicationDocUrl,
     };
 
-    // Safely parse number fields
-    memberData.aadharnumber = safeParseInt(
+    // Identifier fields — kept as strings to preserve exact digits.
+    memberData.aadharnumber = safeString(
       req.body.aadharnumber,
       "Aadhar number",
     );
+    memberData.mobile = safeString(req.body.mobile, "Mobile number");
+
+    // Genuine numeric quantities — safe to parse as integers.
     memberData.applicationno = safeParseInt(
       req.body.applicationno,
       "Application number",
@@ -153,21 +167,14 @@ exports.addMember = async (req, res) => {
       req.body.membershipfees,
       "Membership fees",
     );
-    memberData.mobile = safeParseInt(req.body.mobile, "Mobile number");
 
-    // Optional number fields - only parse if provided
+    // Optional identifier fields - keep as strings when provided
     if (req.body.alternatemobile && req.body.alternatemobile !== "") {
-      memberData.alternatemobile = safeParseInt(
-        req.body.alternatemobile,
-        "Alternate mobile",
-      );
+      memberData.alternatemobile = String(req.body.alternatemobile).trim();
     }
 
     if (req.body.nomineenumber && req.body.nomineenumber !== "") {
-      memberData.nomineenumber = safeParseInt(
-        req.body.nomineenumber,
-        "Nominee number",
-      );
+      memberData.nomineenumber = String(req.body.nomineenumber).trim();
     }
 
     // Receipt number: use the admin-entered value if provided (digits only),
@@ -305,11 +312,14 @@ exports.updateMember = async (req, res) => {
       agreecommunication: req.body.agreecommunication === "true",
     };
 
-    // Safely parse number fields
-    memberData.aadharnumber = safeParseInt(
+    // Identifier fields — kept as strings to preserve exact digits.
+    memberData.aadharnumber = safeString(
       req.body.aadharnumber,
       "Aadhar number",
     );
+    memberData.mobile = safeString(req.body.mobile, "Mobile number");
+
+    // Genuine numeric quantities — safe to parse as integers.
     memberData.applicationno = safeParseInt(
       req.body.applicationno,
       "Application number",
@@ -318,21 +328,14 @@ exports.updateMember = async (req, res) => {
       req.body.membershipfees,
       "Membership fees",
     );
-    memberData.mobile = safeParseInt(req.body.mobile, "Mobile number");
 
-    // Optional number fields
+    // Optional identifier fields - keep as strings when provided
     if (req.body.alternatemobile && req.body.alternatemobile !== "") {
-      memberData.alternatemobile = safeParseInt(
-        req.body.alternatemobile,
-        "Alternate mobile",
-      );
+      memberData.alternatemobile = String(req.body.alternatemobile).trim();
     }
 
     if (req.body.nomineenumber && req.body.nomineenumber !== "") {
-      memberData.nomineenumber = safeParseInt(
-        req.body.nomineenumber,
-        "Nominee number",
-      );
+      memberData.nomineenumber = String(req.body.nomineenumber).trim();
     }
 
     const updatedMember = await Member.updateOne(

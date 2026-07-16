@@ -15,8 +15,12 @@ const memberSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Aadhaar is a 12-digit identifier, not a quantity. Stored as String so
+    // the exact digits are preserved — a Number type mangles values with
+    // spaces ("6890 5011 5053" → NaN), leading zeros, or 12-digit lengths
+    // (which get exported as scientific notation e.g. 9.68581E+11).
     aadharnumber: {
-      type: Number,
+      type: String,
       required: true,
     },
     applicationno: {
@@ -46,17 +50,19 @@ const memberSchema = new mongoose.Schema(
     },
     father: String,
     birthplace: String,
+    // Phone numbers are identifiers too — String preserves leading zeros and
+    // any country-code / formatting the admin entered.
     mobile: {
-      type: Number,
+      type: String,
       required: true,
     },
-    alternatemobile: Number,
+    alternatemobile: String,
     email: String,
     alternateemail: String,
     permanentaddress: String,
     correspondenceaddress: String,
     nomineename: String,
-    nomineenumber: Number,
+    nomineenumber: String,
     nomineeage: String,
     nomineerelationship: String,
     nomineeaddress: String,
