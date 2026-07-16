@@ -19,17 +19,31 @@
  * Requires the same MONGODB connection env the app uses. Safe to re-run.
  */
 
+// Load the same .env the app uses (server.js does require("dotenv").config()),
+// so MONGODB_URI points at your real Atlas database — not localhost.
+require("dotenv").config();
+
 const mongoose = require("mongoose");
 const fs = require("fs");
 const path = require("path");
 const Member = require("./models/Member");
 
-// Adjust this if your app reads the URI from a different env var.
+// Uses the same env var the app's database.js reads (process.env.MONGODB_URI).
+// If it's missing, we stop with a clear message rather than silently trying
+// localhost (which is what caused ECONNREFUSED 127.0.0.1:27017).
 const MONGO_URI =
   process.env.MONGODB_URI ||
   process.env.MONGO_URI ||
-  process.env.DB_URI ||
-  "mongodb://127.0.0.1:27017/gruhakalpa";
+  process.env.DB_URI;
+
+if (!MONGO_URI) {
+  console.error(
+    "MONGODB_URI is not set. Make sure a .env file exists in this folder " +
+      "with MONGODB_URI=... (the same one the app uses), or run:\n" +
+      "  MONGODB_URI='your-atlas-uri' node fixMemberIdentifiers.js",
+  );
+  process.exit(1);
+}
 
 // Turn any stored value into clean digit text. Handles Number, scientific
 // notation strings, and space-separated strings. Returns "" if unrecoverable.
@@ -166,7 +180,12 @@ async function main() {
     }
 
     if (Object.keys(set).length > 0) {
-      await Member.updateOne({ _id: m._id }, { $set: set });
+      // Update through the raw driver collection so the _id filter uses the
+      // value EXACTLY as stored. Some rows were imported from the CSV with a
+      // plain integer _id (1, 2, 3...) instead of an ObjectId; Mongoose's
+      // updateOne would try to cast "1" into an ObjectId and fail. The raw
+      // collection accepts either an integer or an ObjectId as-is.
+      await Member.collection.updateOne({ _id: m._id }, { $set: set });
       updated++;
     }
   }
