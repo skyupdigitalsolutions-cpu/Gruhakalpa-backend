@@ -30,6 +30,13 @@ const generateMembershipReceiptNumber = async () => {
   return receiptNo;
 };
 
+// Parse an incoming membership date string into a Date, or null if absent/invalid.
+const parseMembershipDate = (value) => {
+  if (value === "" || value === null || value === undefined) return null;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
+};
+
 exports.updateMemberById = async (req, res) => {
   try {
     const updated = await Member.updateOne(
@@ -131,7 +138,8 @@ exports.addMember = async (req, res) => {
       name: req.body.name,
       membershiptype: req.body.membershiptype,
       date: new Date(req.body.date),
-      membershipday: req.body.membershipday,
+      // Admin-picked membership date, stored as a real Date.
+      membership_date: parseMembershipDate(req.body.membership_date),
       dob: new Date(req.body.dob),
       father: req.body.father,
       birthplace: req.body.birthplace,
@@ -296,7 +304,8 @@ exports.updateMember = async (req, res) => {
       name: req.body.name,
       membershiptype: req.body.membershiptype,
       date: new Date(req.body.date),
-      membershipday: req.body.membershipday,
+      // Admin-picked membership date, stored as a real Date.
+      membership_date: parseMembershipDate(req.body.membership_date),
       dob: new Date(req.body.dob),
       father: req.body.father,
       birthplace: req.body.birthplace,
