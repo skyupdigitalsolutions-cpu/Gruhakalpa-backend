@@ -1,5 +1,4 @@
 const mongoose = require("mongoose");
-
 const memberSchema = new mongoose.Schema(
   {
     name: {
@@ -31,9 +30,17 @@ const memberSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    // Record/creation date (when the member was added to the system).
     date: {
       type: Date,
       required: true,
+    },
+    // The actual date the membership was granted (admin-picked in the form).
+    // Stored as a real Date so it sorts/filters/formats correctly — replaces
+    // the old free-text `membershipday` string.
+    membership_date: {
+      type: Date,
+      default: null,
     },
     name: {
       type: String,
@@ -43,6 +50,9 @@ const memberSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    // Legacy free-text field kept for backward compatibility with older
+    // records. New writes use `membership_date` above; safe to remove once all
+    // historical rows have been migrated.
     membershipday: String,
     membershipfees: {
       type: Number,
@@ -95,7 +105,6 @@ const memberSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
-
 // Enforce uniqueness of membership_receipt_no at the DB level.
 // partialFilterExpression limits the unique constraint to documents where the
 // field is an actual string, so members without a receipt number (null / absent)
@@ -107,5 +116,4 @@ memberSchema.index(
     partialFilterExpression: { membership_receipt_no: { $type: "string" } },
   },
 );
-
 module.exports = mongoose.model("Member", memberSchema, "membership");
