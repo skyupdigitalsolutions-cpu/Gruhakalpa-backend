@@ -255,7 +255,14 @@ const sendOne = async ({
       templateName,
       integratedNumber: wa.integratedNumber,
       languageCode: wa.languageCode || "en",
-      // body_1..body_5 => name, membership id, amount, installment label, due date
+      // POSITIONAL variables {{1}}..{{5}}, in this exact order:
+      //   {{1}} = member name
+      //   {{2}} = membership id
+      //   {{3}} = amount (₹)
+      //   {{4}} = installment label
+      //   {{5}} = due date
+      // If your approved template has only 4 variables (no membership id),
+      // delete the `row.membership_id` line below so the shape matches.
       bodyValues: [
         row.name,
         row.membership_id,
@@ -263,18 +270,11 @@ const sendOne = async ({
         bucket.label,
         fmtDate(bucket.dueDate),
       ],
-      // Template uses NAMED variables: {{customer_name}}, {{amount}},
-      // {{installment}}, {{membership_id}}, {{due_date}}. Named params match by
-      // NAME (not position), so each name below pairs with the value at the same
-      // index in bodyValues above. MSG91_BODY_NAMES (env) overrides if set.
-      bodyNames:
-        WA_BODY_NAMES || [
-          "customer_name",
-          "membership_id",
-          "amount",
-          "installment",
-          "due_date",
-        ],
+      // DEFAULT = positional (keys body_1..body_N), which is what MSG91
+      // dashboard templates ({{1}},{{2}}...) expect and what MSG91 accepted in
+      // testing. Only set MSG91_BODY_NAMES in .env if your template was built
+      // with NAMED variables ({{customer_name}}...) — then it uses those names.
+      bodyNames: WA_BODY_NAMES || null,
     });
 
     return MessageLog.create({

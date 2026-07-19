@@ -104,7 +104,7 @@ const sendWhatsAppTemplate = async ({
         type: "template",
         template: {
           name: templateName,
-          language: { code: languageCode || "en_US", policy: "deterministic" },
+          language: { code: languageCode || "en", policy: "deterministic" },
           to_and_components: [
             {
               to: [phone],
