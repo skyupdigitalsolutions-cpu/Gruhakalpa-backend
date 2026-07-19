@@ -732,7 +732,8 @@ exports.updateSettings = async (req, res) => {
     if (b.whatsapp) {
       settings.whatsapp = {
         enabled: !!b.whatsapp.enabled,
-        integratedNumber: b.whatsapp.integratedNumber || "",
+        // Strip whitespace so a pasted "\t 9190..." can't break sending.
+        integratedNumber: String(b.whatsapp.integratedNumber || "").replace(/\s+/g, ""),
         templateUpcoming: b.whatsapp.templateUpcoming || "",
         templateOverdue: b.whatsapp.templateOverdue || "",
         templateConfirmation: b.whatsapp.templateConfirmation || "",

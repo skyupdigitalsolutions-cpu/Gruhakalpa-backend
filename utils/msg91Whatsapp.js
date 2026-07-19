@@ -59,7 +59,13 @@ const sendWhatsAppTemplate = async ({
     const phone = normalizePhone(to);
     if (!phone) return { success: false, error: `Invalid phone number: ${to}` };
 
-    const number = integratedNumber || process.env.MSG91_WHATSAPP_NUMBER;
+    // Clean the sender/integrated number. MSG91 rejects it with "WhatsApp not
+    // integrated" if it carries a stray tab/space — a common copy-paste artifact
+    // in the Automation Setup field (e.g. "\t 919071553938"). Strip ALL
+    // whitespace so a dirty settings value can't break delivery.
+    const number = String(
+      integratedNumber || process.env.MSG91_WHATSAPP_NUMBER || "",
+    ).replace(/\s+/g, "");
     if (!number)
       return {
         success: false,
