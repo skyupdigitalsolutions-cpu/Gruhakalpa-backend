@@ -19,6 +19,14 @@ const WA_BODY_NAMES = process.env.MSG91_BODY_NAMES
   ? process.env.MSG91_BODY_NAMES.split(",").map((s) => s.trim()).filter(Boolean)
   : null;
 
+// If your CONFIRMATION template is also NAMED (check its dashboard "Copy Code"),
+// set MSG91_CONFIRMATION_BODY_NAMES in .env to its variable names in the SAME
+// order as the confirmation values below (name, amount paid, remaining, date).
+// Leave unset to send positional (body_1..body_N) for a {{1}} confirmation.
+const WA_CONFIRMATION_BODY_NAMES = process.env.MSG91_CONFIRMATION_BODY_NAMES
+  ? process.env.MSG91_CONFIRMATION_BODY_NAMES.split(",").map((s) => s.trim()).filter(Boolean)
+  : null;
+
 const inr = (n) => `Rs.${Number(n || 0).toLocaleString("en-IN")}`;
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-IN") : "";
@@ -255,26 +263,27 @@ const sendOne = async ({
       templateName,
       integratedNumber: wa.integratedNumber,
       languageCode: wa.languageCode || "en",
-      // POSITIONAL variables {{1}}..{{5}}, in this exact order:
-      //   {{1}} = member name
-      //   {{2}} = membership id
-      //   {{3}} = amount (₹)
-      //   {{4}} = installment label
-      //   {{5}} = due date
-      // If your approved template has only 4 variables (no membership id),
-      // delete the `row.membership_id` line below so the shape matches.
+      // NAMED variables, matched by name (order here just pairs value↔name).
+      // Order follows the template's Copy Code:
+      //   customer_name, amount, installment, membership_id, due_date
       bodyValues: [
-        row.name,
-        row.membership_id,
-        inr(bucket.outstanding),
-        bucket.label,
-        fmtDate(bucket.dueDate),
+        row.name, // customer_name
+        inr(bucket.outstanding), // amount
+        bucket.label, // installment
+        row.membership_id, // membership_id
+        fmtDate(bucket.dueDate), // due_date
       ],
-      // DEFAULT = positional (keys body_1..body_N), which is what MSG91
-      // dashboard templates ({{1}},{{2}}...) expect and what MSG91 accepted in
-      // testing. Only set MSG91_BODY_NAMES in .env if your template was built
-      // with NAMED variables ({{customer_name}}...) — then it uses those names.
-      bodyNames: WA_BODY_NAMES || null,
+      // The approved template uses NAMED variables. MSG91 needs each sent as
+      // "body_<name>" with a parameter_name (handled in msg91Whatsapp.js).
+      // Override the names via MSG91_BODY_NAMES in .env only if you change the
+      // template. Names MUST exactly match the {{...}} in the template body.
+      bodyNames: WA_BODY_NAMES || [
+        "customer_name",
+        "amount",
+        "installment",
+        "membership_id",
+        "due_date",
+      ],
     });
 
     return MessageLog.create({
@@ -372,6 +381,9 @@ const sendConfirmationOne = async ({
         inr(remaining),
         fmtDate(date),
       ],
+      // Positional by default. If the confirmation template is NAMED, set
+      // MSG91_CONFIRMATION_BODY_NAMES in .env (see note at top of file).
+      bodyNames: WA_CONFIRMATION_BODY_NAMES || null,
     });
     return MessageLog.create({
       ...logBase,

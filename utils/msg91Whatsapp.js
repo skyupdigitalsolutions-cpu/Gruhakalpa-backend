@@ -45,6 +45,7 @@ const sendWhatsAppTemplate = async ({
   languageCode = "en",
   bodyValues = [],
   bodyNames = null,
+  namespace = null,
 }) => {
   try {
     if (!isConfigured()) {
@@ -69,25 +70,32 @@ const sendWhatsAppTemplate = async ({
     if (!templateName)
       return { success: false, error: "No WhatsApp template name configured." };
 
-    // Build the body component map. WhatsApp templates use EITHER positional
-    // variables ({{1}},{{2}}...) OR named variables ({{name}},{{amount}}...).
-    // - Positional  -> keys must be body_1, body_2, ...
-    // - Named       -> keys must be the exact variable names from the template
-    // Pass `bodyNames` (same length/order as bodyValues) to use named params.
-    // MSG91 rejects with "Parameter name is missing or empty" if the keys
-    // don't match what the approved template expects.
+    // Build the body component map to match MSG91's exact WhatsApp template
+    // format (the shape the dashboard "Copy Code" produces).
+    //
+    // NAMED templates (this project's gruhakalpa_payment_reminder) — pass
+    // bodyNames. Each {{customer_name}} variable becomes a component keyed
+    // "body_<name>" carrying BOTH a value AND a parameter_name:
+    //   "body_customer_name": { type:"text", value:"srinivas",
+    //                            parameter_name:"customer_name" }
+    // Matching is by NAME, so bodyNames[i] pairs with bodyValues[i].
+    //
+    // POSITIONAL templates ({{1}},{{2}}...) — omit bodyNames. Keys become
+    // "body_1".."body_N" with value only.
     const components = {};
     bodyValues.forEach((val, i) => {
-      const key =
-        Array.isArray(bodyNames) && bodyNames[i]
-          ? String(bodyNames[i])
-          : `body_${i + 1}`;
       const v = String(val ?? "");
-      // MSG91 reads the body param from the "value" field for positional
-      // ({{1}}..{{N}}) templates. Sending only "text" makes params reach Meta
-      // empty (localizable_params 0); sending both "value" and "text" trips
-      // MSG91's "Parameter name is missing or empty". So send "value" alone.
-      components[key] = { type: "text", value: v };
+      const name =
+        Array.isArray(bodyNames) && bodyNames[i] ? String(bodyNames[i]) : null;
+      if (name) {
+        components[`body_${name}`] = {
+          type: "text",
+          value: v,
+          parameter_name: name,
+        };
+      } else {
+        components[`body_${i + 1}`] = { type: "text", value: v };
+      }
     });
 
     // Log exactly what we're about to send so the real payload is visible.
@@ -96,22 +104,25 @@ const sendWhatsAppTemplate = async ({
       JSON.stringify({ templateName, to: phone, components }),
     );
 
+    // Build the template object; attach the WABA namespace when available.
+    // The MSG91 dashboard "Copy Code" for named templates includes a
+    // "namespace" — some accounts require it for delivery. Set it via
+    // MSG91_WHATSAPP_NAMESPACE in .env (or pass per-call). Harmless if unused.
+    const template = {
+      name: templateName,
+      language: { code: languageCode || "en", policy: "deterministic" },
+      to_and_components: [{ to: [phone], components }],
+    };
+    const ns = namespace || process.env.MSG91_WHATSAPP_NAMESPACE;
+    if (ns) template.namespace = String(ns);
+
     const payload = {
       integrated_number: String(number),
       content_type: "template",
       payload: {
         messaging_product: "whatsapp",
         type: "template",
-        template: {
-          name: templateName,
-          language: { code: languageCode || "en", policy: "deterministic" },
-          to_and_components: [
-            {
-              to: [phone],
-              components,
-            },
-          ],
-        },
+        template,
       },
     };
 
