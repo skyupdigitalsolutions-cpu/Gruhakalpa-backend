@@ -20,6 +20,13 @@ const WA_BODY_NAMES = process.env.MSG91_BODY_NAMES
   ? process.env.MSG91_BODY_NAMES.split(",").map((s) => s.trim()).filter(Boolean)
   : null;
 
+// The OVERDUE template can have its own variable order (ours differs from the
+// upcoming template). Override with MSG91_OVERDUE_BODY_NAMES in .env if you
+// rebuild it; otherwise the default order in sendOne() is used.
+const WA_OVERDUE_BODY_NAMES = process.env.MSG91_OVERDUE_BODY_NAMES
+  ? process.env.MSG91_OVERDUE_BODY_NAMES.split(",").map((s) => s.trim()).filter(Boolean)
+  : null;
+
 // If your CONFIRMATION template is also NAMED (check its dashboard "Copy Code"),
 // set MSG91_CONFIRMATION_BODY_NAMES in .env to its variable names in the SAME
 // order as the confirmation values below (name, amount paid, remaining, date).
@@ -259,35 +266,48 @@ const sendOne = async ({
       ? wa.templateOverdue || wa.templateUpcoming
       : wa.templateUpcoming;
 
+    // Each template variable as a { name, value } pair.
+    const fields = {
+      customer_name: row.name,
+      membership_id: row.membership_id,
+      installment: bucket.label,
+      amount: inr(bucket.outstanding),
+      due_date: fmtDate(bucket.dueDate),
+    };
+
+    // IMPORTANT: MSG91 falls back to POSITIONAL matching even for NAMED
+    // templates, so the order we send MUST match the variable order in the
+    // approved MSG91 template. The upcoming and overdue templates were built
+    // with DIFFERENT orders, so we pick the order per template here:
+    //   upcoming: customer_name, membership_id, installment, amount, due_date
+    //   overdue : customer_name, membership_id, amount, installment, due_date
+    // If you rebuild a template, just update the matching list below (or set
+    // MSG91_BODY_NAMES / MSG91_OVERDUE_BODY_NAMES in .env to override).
+    const order = isOverdue
+      ? WA_OVERDUE_BODY_NAMES || [
+          "customer_name",
+          "membership_id",
+          "amount",
+          "installment",
+          "due_date",
+        ]
+      : WA_BODY_NAMES || [
+          "customer_name",
+          "membership_id",
+          "installment",
+          "amount",
+          "due_date",
+        ];
+
     const result = await sendWhatsAppTemplate({
       to: row.mobile,
       templateName,
       integratedNumber: wa.integratedNumber,
       languageCode: wa.languageCode || "en",
-      // NAMED variables, matched by name (order here just pairs value↔name).
-      // IMPORTANT: the order MUST match the variable order in the approved
-      // MSG91 template, because MSG91 falls back to POSITIONAL matching even
-      // for named templates. Template order is:
-      //   customer_name, membership_id, installment, amount, due_date
-      bodyValues: [
-        row.name, // customer_name
-        row.membership_id, // membership_id
-        bucket.label, // installment
-        inr(bucket.outstanding), // amount
-        fmtDate(bucket.dueDate), // due_date
-      ],
-      // The approved template uses NAMED variables. MSG91 needs each sent as
-      // "body_<name>" with a parameter_name (handled in msg91Whatsapp.js).
-      // Override the names via MSG91_BODY_NAMES in .env only if you change the
-      // template. Names MUST exactly match the {{...}} in the template body,
-      // AND the order MUST match the template's variable order.
-      bodyNames: WA_BODY_NAMES || [
-        "customer_name",
-        "membership_id",
-        "installment",
-        "amount",
-        "due_date",
-      ],
+      // NAMED variables — bodyNames[i] pairs with bodyValues[i], both in the
+      // template's own variable order (see `order` above).
+      bodyValues: order.map((name) => fields[name] ?? ""),
+      bodyNames: order,
     });
 
     return MessageLog.create({

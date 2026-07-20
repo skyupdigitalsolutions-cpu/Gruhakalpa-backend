@@ -99,7 +99,7 @@ const sendMail = async (
     const sendSmtpEmail = new Brevo.SendSmtpEmail();
 
     sendSmtpEmail.sender = {
-      name: "Navanagara Society",
+      name: "The Gruhakalpa Housing Co-Operative Society Ltd.",
       email: process.env.SENDER_EMAIL,
     };
 

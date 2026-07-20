@@ -18,7 +18,7 @@ app.post("/add-admin", (req, res) => {
     mail: req.body.mail,
   };
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("admins")
       .insertOne(user)
@@ -40,7 +40,7 @@ app.post("/add-payment", (req, res) => {
     amountpaid: parseInt(req.body.amountpaid),
   };
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("payments")
       .insertOne(payment)
@@ -79,7 +79,7 @@ app.post("/add-members", (req, res) => {
     agreecommunication: Boolean(req.body.agreecommunication),
   };
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("membership")
       .insertOne(member)
@@ -98,7 +98,7 @@ app.post("/site-booking", async (req, res) => {
     }
 
     const clientObj = await mongoclient.connect(connectionstring);
-    const database = clientObj.db("navanagara");
+    const database = clientObj.db("gruhakalpa-dashboard");
 
     // Fetch member details to get mobile number
     const memberDoc = await database
@@ -147,7 +147,7 @@ app.post("/receipt", async (req, res) => {
     }
 
     const clientObj = await mongoclient.connect(connectionstring);
-    const database = clientObj.db("navanagara");
+    const database = clientObj.db("gruhakalpa-dashboard");
 
     // always fetch bookingamount from sitebookings
     const bookingDoc = await database
@@ -191,7 +191,7 @@ app.post("/receipt", async (req, res) => {
 app.put("/backfill-receipts", async (req, res) => {
   try {
     const clientObj = await mongoclient.connect(connectionstring);
-    const database = clientObj.db("navanagara");
+    const database = clientObj.db("gruhakalpa-dashboard");
 
     const receipts = await database.collection("receipts").find({}).toArray();
     let updated = 0;
@@ -257,7 +257,7 @@ app.put("/update-member/:id", (req, res) => {
     agreecommunication: Boolean(req.body.agreecommunication),
   };
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("membership")
       .updateOne({ membershipid: req.params.id }, { $set: member })
@@ -284,7 +284,7 @@ app.put("/update-sitebooking/:id", (req, res) => {
     senioritynumber: req.body.senioritynumber,
   };
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("sitebookings")
       .updateOne({ membershipid: req.params.id }, { $set: fields })
@@ -303,7 +303,7 @@ app.put("/edit-admin/:id", (req, res) => {
     mail: req.body.mail,
   };
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("admins")
       .updateOne({ admin_id: req.params.id }, { $set: user })
@@ -316,7 +316,7 @@ app.put("/edit-admin/:id", (req, res) => {
 
 app.get("/payments", (req, res) => {
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("payments")
       .find({})
@@ -339,7 +339,7 @@ app.get("/payments", (req, res) => {
 //         created_by: req.body.created_by
 //     }
 //     mongoclient.connect(connectionstring).then(clientObj=>{
-//         var database = clientObj.db("navanagara");
+//         var database = clientObj.db("gruhakalpa-dashboard");
 //         database.collection("receipts").updateOne({receipt_no:req.params.id},{$set:fields}).then(()=>{
 //             res.send("Updated the Receipt!..");
 //             res.end();
@@ -349,7 +349,7 @@ app.get("/payments", (req, res) => {
 
 app.get("/admins", (req, res) => {
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("admins")
       .find({})
@@ -363,7 +363,7 @@ app.get("/admins", (req, res) => {
 
 app.get("/receipts", (req, res) => {
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("receipts")
       .find({})
@@ -377,7 +377,7 @@ app.get("/receipts", (req, res) => {
 
 app.get("/sitebookings", (req, res) => {
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("sitebookings")
       .find({})
@@ -391,7 +391,7 @@ app.get("/sitebookings", (req, res) => {
 
 app.get("/members", (req, res) => {
   mongoclient.connect(connectionstring).then((clientObj) => {
-    var database = clientObj.db("navanagara");
+    var database = clientObj.db("gruhakalpa-dashboard");
     database
       .collection("membership")
       .find({})

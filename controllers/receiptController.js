@@ -338,7 +338,7 @@ The Gruhakalpa Housing Co-Operative Society Ltd.`
 Thank you for your payment.
 
 Your account is generated 
-link             : https://www.navanagarahousebuildingsociety.com/memberlogin
+link             : https://gruhakalpa-frontend.pages.dev/memberlogin
 Username         : ${membershipId}
 password         : ${memberDoc.mobile}
 Membership ID    : ${membershipId}
@@ -352,7 +352,7 @@ Date             : ${new Date(receiptData.date).toLocaleDateString("en-IN")}
 Your payment receipt is attached to this email. For any questions please contact our support team.
 
 Best Regards,
-Navanagara House Building Co-operative Society`;
+The Gruhakalpa Housing Co-Operative Society Ltd.`;
 
         // Company copy message
         const companyMessage = `New Receipt Generated
@@ -376,7 +376,7 @@ Project          : ${isDeposit ? (depositLabel || "N/A") : (receiptData.projectn
 ---
 
 PDF receipt is attached.
-Navanagara Admin System`;
+Gruhakalpa Admin System`;
 
         const emailPromises = [];
 
