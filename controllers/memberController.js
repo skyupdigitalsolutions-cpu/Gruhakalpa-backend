@@ -280,7 +280,7 @@ exports.addMember = async (req, res) => {
 // Get all members
 exports.getAllMembers = async (req, res) => {
   try {
-    const members = await Member.find({}).sort({ createdAt: -1 });
+    const members = await Member.find({}).sort({ membership_id: 1 });
     res.status(200).json({
       success: true,
       data: members,
