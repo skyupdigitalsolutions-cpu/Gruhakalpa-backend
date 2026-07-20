@@ -332,7 +332,7 @@ Date             : ${new Date(receiptData.date).toLocaleDateString("en-IN")}
 Your payment receipt is attached to this email. For any questions please contact our support team.
 
 Best Regards,
-Navanagara House Building Co-operative Society`
+The Gruhakalpa Housing Co-Operative Society Ltd.`
           : `Dear ${receiptData.name},
 
 Thank you for your payment.

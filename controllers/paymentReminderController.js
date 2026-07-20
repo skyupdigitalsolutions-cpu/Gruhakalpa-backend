@@ -12,8 +12,9 @@ const {
 
 // If your approved WhatsApp template uses NAMED variables ({{name}} etc.),
 // set MSG91_BODY_NAMES in .env to the comma-separated names in the SAME order
-// as the values sent below (name, membership id, amount, installment, due date).
-// Example: MSG91_BODY_NAMES=name,membership_id,amount,installment,due_date
+// as they appear in the template (customer_name, membership_id, installment,
+// amount, due_date).
+// Example: MSG91_BODY_NAMES=customer_name,membership_id,installment,amount,due_date
 // Leave it unset to send positional variables (body_1..body_N) for {{1}} templates.
 const WA_BODY_NAMES = process.env.MSG91_BODY_NAMES
   ? process.env.MSG91_BODY_NAMES.split(",").map((s) => s.trim()).filter(Boolean)
@@ -208,7 +209,7 @@ const buildReminderText = (row, bucket, kind, milestone) => {
     : `is ${timingPhrase(milestone)}`;
   return `Dear ${row.name},
 
-This is a ${overdue ? "payment overdue notice" : "friendly payment reminder"} from Navanagara House Building Co-operative Society.
+This is a ${overdue ? "payment overdue notice" : "friendly payment reminder"} from The Gruhakalpa Housing Co-Operative Society Ltd.
 
 Membership ID : ${row.membership_id}
 ${bucket.label}   : ${inr(bucket.outstanding)}
@@ -223,7 +224,7 @@ Your ${bucket.label} payment ${when}.${
 For any queries please contact the society office.
 
 Best Regards,
-Navanagara House Building Co-operative Society`;
+The Gruhakalpa Housing Co-Operative Society Ltd.`;
 };
 
 // Send one reminder over one channel and write a MessageLog row.
@@ -264,24 +265,27 @@ const sendOne = async ({
       integratedNumber: wa.integratedNumber,
       languageCode: wa.languageCode || "en",
       // NAMED variables, matched by name (order here just pairs value↔name).
-      // Order follows the template's Copy Code:
-      //   customer_name, amount, installment, membership_id, due_date
+      // IMPORTANT: the order MUST match the variable order in the approved
+      // MSG91 template, because MSG91 falls back to POSITIONAL matching even
+      // for named templates. Template order is:
+      //   customer_name, membership_id, installment, amount, due_date
       bodyValues: [
         row.name, // customer_name
-        inr(bucket.outstanding), // amount
-        bucket.label, // installment
         row.membership_id, // membership_id
+        bucket.label, // installment
+        inr(bucket.outstanding), // amount
         fmtDate(bucket.dueDate), // due_date
       ],
       // The approved template uses NAMED variables. MSG91 needs each sent as
       // "body_<name>" with a parameter_name (handled in msg91Whatsapp.js).
       // Override the names via MSG91_BODY_NAMES in .env only if you change the
-      // template. Names MUST exactly match the {{...}} in the template body.
+      // template. Names MUST exactly match the {{...}} in the template body,
+      // AND the order MUST match the template's variable order.
       bodyNames: WA_BODY_NAMES || [
         "customer_name",
-        "amount",
-        "installment",
         "membership_id",
+        "installment",
+        "amount",
         "due_date",
       ],
     });
@@ -343,7 +347,7 @@ ${
 }
 
 Best Regards,
-Navanagara House Building Co-operative Society`;
+The Gruhakalpa Housing Co-Operative Society Ltd.`;
 
 const sendConfirmationOne = async ({
   row,
