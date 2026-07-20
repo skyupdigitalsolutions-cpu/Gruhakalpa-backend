@@ -237,6 +237,11 @@ exports.addMember = async (req, res) => {
       message: "Member Added Successfully!",
       data: member,
     });
+
+    // Fire welcome WhatsApp + email in the background (never blocks the response).
+    setImmediate(() => {
+      require("../utils/eventNotifications").notifyMemberAdded(member);
+    });
   } catch (error) {
     console.error("Error adding member:", error);
 

@@ -111,6 +111,11 @@ exports.createRecurringDeposit = async (req, res) => {
 
     const created = await RecurringDeposit.create(doc);
     res.status(201).json({ success: true, message: "Recurring Deposit created", data: created });
+
+    // Fire RD-created WhatsApp + email in the background.
+    setImmediate(() => {
+      require("../utils/eventNotifications").notifyRdCreated(created);
+    });
   } catch (error) {
     console.error("createRecurringDeposit error:", error);
     res.status(500).json({ success: false, message: "Error creating recurring deposit" });

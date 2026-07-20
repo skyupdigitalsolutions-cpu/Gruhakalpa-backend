@@ -210,6 +210,11 @@ exports.createFixedDeposit = async (req, res) => {
     if (!created) throw lastErr || new Error("Could not allocate FDR number");
 
     res.status(201).json({ success: true, message: "Fixed Deposit created", data: created });
+
+    // Fire FD-created WhatsApp + email in the background.
+    setImmediate(() => {
+      require("../utils/eventNotifications").notifyFdCreated(created);
+    });
   } catch (error) {
     console.error("createFixedDeposit error:", error);
     res.status(500).json({ success: false, message: "Error creating fixed deposit" });
@@ -328,6 +333,23 @@ exports.saveCertificate = async (req, res) => {
     await fd.save();
 
     res.status(200).json({ success: true, message: "Certificate saved", data: fd });
+
+    // Fire the FD-CERTIFICATE notification — WhatsApp with the PDF attached via
+    // the template's document header (public Cloudinary URL) + email with the
+    // PDF attachment. Fully background, never blocks the response.
+    setImmediate(() => {
+      require("../utils/eventNotifications").notifyFdCertificate({
+        membership_id: fd.membershipId,
+        name: fd.name,
+        mobile: fd.mobilenumber,
+        fdrNo: fdrNumber || fd.fdrNo,
+        amount: fd.amount,
+        maturityDate: fd.maturityDate,
+        pdfUrl: uploadResult.secure_url,
+        pdfBase64,
+        pdfFilename: `${publicId}.pdf`,
+      });
+    });
   } catch (error) {
     console.error("saveCertificate error:", error);
     res.status(500).json({ success: false, message: "Error saving certificate" });

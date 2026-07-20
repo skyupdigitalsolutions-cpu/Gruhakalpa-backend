@@ -220,6 +220,11 @@ exports.createSiteBooking = async (req, res) => {
 
     await siteBooking.save();
     res.status(201).json({ success: true, message: "Created Successfully!" });
+
+    // Fire site-booking WhatsApp + email in the background.
+    setImmediate(() => {
+      require("../utils/eventNotifications").notifySiteBooking(siteBooking);
+    });
   } catch (error) {
     console.error(error);
     res

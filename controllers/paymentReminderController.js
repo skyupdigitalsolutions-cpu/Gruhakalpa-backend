@@ -753,7 +753,12 @@ exports.updateSettings = async (req, res) => {
       if (arr.length) settings.preDueOffsets = arr;
     }
 
+    if (typeof b.eventNotificationsEnabled === "boolean") {
+      settings.eventNotificationsEnabled = b.eventNotificationsEnabled;
+    }
+
     if (b.whatsapp) {
+      const existing = settings.whatsapp || {};
       settings.whatsapp = {
         enabled: !!b.whatsapp.enabled,
         // Strip whitespace so a pasted "\t 9190..." can't break sending.
@@ -761,6 +766,22 @@ exports.updateSettings = async (req, res) => {
         templateUpcoming: b.whatsapp.templateUpcoming || "",
         templateOverdue: b.whatsapp.templateOverdue || "",
         templateConfirmation: b.whatsapp.templateConfirmation || "",
+        // Event-notification templates — keep the saved value when the caller
+        // doesn't send one, so this handler can't wipe them.
+        templateReceipt:
+          b.whatsapp.templateReceipt ?? existing.templateReceipt ?? "",
+        templateFdCertificate:
+          b.whatsapp.templateFdCertificate ??
+          existing.templateFdCertificate ??
+          "",
+        templateFdCreated:
+          b.whatsapp.templateFdCreated ?? existing.templateFdCreated ?? "",
+        templateRdCreated:
+          b.whatsapp.templateRdCreated ?? existing.templateRdCreated ?? "",
+        templateMemberAdded:
+          b.whatsapp.templateMemberAdded ?? existing.templateMemberAdded ?? "",
+        templateSiteBooking:
+          b.whatsapp.templateSiteBooking ?? existing.templateSiteBooking ?? "",
         languageCode: b.whatsapp.languageCode || "en",
       };
     }

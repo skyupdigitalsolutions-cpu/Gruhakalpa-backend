@@ -304,6 +304,24 @@ exports.createReceipt = async (req, res) => {
       });
     }
 
+    // Fire the RECEIPT notification — WhatsApp with the PDF attached via the
+    // template's document header (public Cloudinary URL) + email with the PDF
+    // attachment. Runs for every receipt (site + deposits). Fully background.
+    setImmediate(() => {
+      require("../utils/eventNotifications").notifyReceipt({
+        membership_id: membershipId,
+        name: receiptData.name,
+        mobile: receiptData.mobilenumber,
+        email: receiptData.email,
+        receiptNo: receipt_no,
+        amount: amountpaid,
+        paymentType: isDeposit ? depositLabel || "Deposit" : "Site Payment",
+        pdfUrl,
+        pdfBase64,
+        pdfFilename,
+      });
+    });
+
     // Send emails in background (after response is sent)
     setImmediate(async () => {
       try {

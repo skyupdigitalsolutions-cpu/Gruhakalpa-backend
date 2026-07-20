@@ -21,7 +21,7 @@ const messageLogSchema = new mongoose.Schema(
     // Why the message was sent
     kind: {
       type: String,
-      enum: ["upcoming", "overdue", "confirmation", "manual"],
+      enum: ["upcoming", "overdue", "confirmation", "manual", "event"],
       default: "manual",
       index: true,
     },

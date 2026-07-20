@@ -10,6 +10,10 @@ const reminderSettingsSchema = new mongoose.Schema(
     // Master switch for the auto scheduler
     autoEnabled: { type: Boolean, default: false },
 
+    // Master switch for event notifications (member/booking/FD/RD/receipt/
+    // certificate messages fired automatically when the record is created).
+    eventNotificationsEnabled: { type: Boolean, default: true },
+
     // How many days BEFORE a due date a payment counts as "due soon"
     // (and triggers an upcoming reminder).
     reminderWindowDays: { type: Number, default: 7 },
@@ -41,6 +45,27 @@ const reminderSettingsSchema = new mongoose.Schema(
       // Sent when a payment is received. Body vars: name, amount paid,
       // remaining balance, date.
       templateConfirmation: { type: String, default: "" },
+
+      // ── Event notifications (fired automatically when a record is created) ──
+      // Each is an approved MSG91 template name. The two PDF ones must be
+      // approved with a DOCUMENT header so the receipt / FD certificate PDF
+      // attaches. Leave blank to skip WhatsApp for that event.
+      templateReceipt: { type: String, default: "gruhakalpa_receipt" },
+      templateFdCertificate: {
+        type: String,
+        default: "gruhakalpa_fd_certificate",
+      },
+      templateFdCreated: { type: String, default: "gruhakalpa_fd_created" },
+      templateRdCreated: { type: String, default: "gruhakalpa_rd_created" },
+      templateMemberAdded: {
+        type: String,
+        default: "gruhakalpa_member_added",
+      },
+      templateSiteBooking: {
+        type: String,
+        default: "gruhakalpa_site_booking",
+      },
+
       languageCode: { type: String, default: "en" },
     },
 

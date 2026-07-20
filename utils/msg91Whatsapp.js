@@ -46,6 +46,12 @@ const sendWhatsAppTemplate = async ({
   bodyValues = [],
   bodyNames = null,
   namespace = null,
+  // Optional PDF (or any document) attached via the template's DOCUMENT header.
+  // The template MUST be approved in MSG91 with a "Document" header for this to
+  // work. documentUrl must be a PUBLIC https link (e.g. the Cloudinary
+  // secure_url we already store for receipts / FD certificates).
+  documentUrl = null,
+  documentFilename = null,
 }) => {
   try {
     if (!isConfigured()) {
@@ -103,6 +109,18 @@ const sendWhatsAppTemplate = async ({
         components[`body_${i + 1}`] = { type: "text", value: v };
       }
     });
+
+    // DOCUMENT header — attaches a PDF to the message. Only added when a
+    // documentUrl is provided AND the approved template has a Document header.
+    // MSG91's format for a media header is a "header_1" component of type
+    // "document" carrying a public link + filename.
+    if (documentUrl) {
+      components["header_1"] = {
+        type: "document",
+        value: String(documentUrl),
+        filename: String(documentFilename || "document.pdf"),
+      };
+    }
 
     // Log exactly what we're about to send so the real payload is visible.
     console.log(
