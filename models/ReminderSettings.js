@@ -40,8 +40,8 @@ const reminderSettingsSchema = new mongoose.Schema(
       integratedNumber: { type: String, default: "" },
       // Approved MSG91 template names. Body variables are sent in order:
       //   1 = member name, 2 = amount (₹), 3 = due label, 4 = due date
-      templateUpcoming: { type: String, default: "gruhakalpa_payment_reminder" },
-      templateOverdue: { type: String, default: "gruhakalpa_payment_overdue" },
+      templateUpcoming: { type: String, default: "wa_reminder_payment" },
+      templateOverdue: { type: String, default: "wa_overdue_payment" },
       // Sent when a payment is received. Body vars: name, amount paid,
       // remaining balance, date.
       templateConfirmation: { type: String, default: "" },
@@ -50,20 +50,20 @@ const reminderSettingsSchema = new mongoose.Schema(
       // Each is an approved MSG91 template name. The two PDF ones must be
       // approved with a DOCUMENT header so the receipt / FD certificate PDF
       // attaches. Leave blank to skip WhatsApp for that event.
-      templateReceipt: { type: String, default: "gruhakalpa_receipt" },
+      templateReceipt: { type: String, default: "wa_gruhakalpa_receipt" },
       templateFdCertificate: {
         type: String,
-        default: "gruhakalpa_fd_certificate",
+        default: "wa_gruhakalpa_fd_certificate",
       },
-      templateFdCreated: { type: String, default: "gruhakalpa_fd_created" },
-      templateRdCreated: { type: String, default: "gruhakalpa_rd_created" },
+      templateFdCreated: { type: String, default: "wa_gruhakalpa_fd_created" },
+      templateRdCreated: { type: String, default: "wa_gruhakalpa_rd_created" },
       templateMemberAdded: {
         type: String,
-        default: "gruhakalpa_member_added",
+        default: "wa_gruhakalpa_add_member",
       },
       templateSiteBooking: {
         type: String,
-        default: "gruhakalpa_site_booking",
+        default: "wa_gruhakalpa_site_booking",
       },
 
       languageCode: { type: String, default: "en" },
@@ -79,11 +79,57 @@ const reminderSettingsSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Approved MSG91 template names for this WABA. Used to auto-fill the settings
+// doc so an existing (pre-event-notifications) settings record gets the right
+// names without the admin having to type all 8 into the Automation Setup tab.
+// A field is only overwritten when it's blank or still holds a known OLD
+// default — a name the admin deliberately typed is never changed.
+const APPROVED_TEMPLATES = {
+  templateUpcoming: "wa_reminder_payment",
+  templateOverdue: "wa_overdue_payment",
+  templateReceipt: "wa_gruhakalpa_receipt",
+  templateFdCertificate: "wa_gruhakalpa_fd_certificate",
+  templateFdCreated: "wa_gruhakalpa_fd_created",
+  templateRdCreated: "wa_gruhakalpa_rd_created",
+  templateMemberAdded: "wa_gruhakalpa_add_member",
+  templateSiteBooking: "wa_gruhakalpa_site_booking",
+};
+// Old placeholder defaults that predate approval — safe to overwrite.
+const OLD_DEFAULTS = new Set([
+  "",
+  "gruhakalpa_payment_reminder",
+  "gruhakalpa_payment_overdue",
+  "gruhakalpa_receipt",
+  "gruhakalpa_fd_certificate",
+  "gruhakalpa_fd_created",
+  "gruhakalpa_rd_created",
+  "gruhakalpa_member_added",
+  "gruhakalpa_site_booking",
+]);
+
 // Convenience loader — always returns the single settings doc, creating
-// it with defaults on first access.
+// it with defaults on first access, and back-filling the approved MSG91
+// template names on an existing doc.
 reminderSettingsSchema.statics.getSettings = async function () {
   let doc = await this.findOne({ key: "global" });
   if (!doc) doc = await this.create({ key: "global" });
+
+  // Back-fill approved template names where the stored value is blank or an
+  // old default. Never touches a custom name the admin set intentionally.
+  let changed = false;
+  if (!doc.whatsapp) doc.whatsapp = {};
+  for (const [field, approved] of Object.entries(APPROVED_TEMPLATES)) {
+    const current = (doc.whatsapp[field] || "").trim();
+    if (OLD_DEFAULTS.has(current) && current !== approved) {
+      doc.whatsapp[field] = approved;
+      changed = true;
+    }
+  }
+  if (changed) {
+    doc.markModified("whatsapp");
+    await doc.save();
+  }
+
   return doc;
 };
 
