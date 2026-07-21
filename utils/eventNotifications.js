@@ -189,6 +189,15 @@ const dispatch = async ({
 const notifyMemberAdded = async (member) => {
   const membership_id = member.membership_id;
   const name = member.name;
+  // The membership-receipt PDF (uploaded by /member-receipt-pdf). When present,
+  // it's attached to WhatsApp via the template's document header and to the
+  // email as a file. When absent (e.g. PDF step failed), the message still
+  // goes out as text.
+  const pdfUrl = member._receiptPdfUrl || null;
+  const pdfBase64 = member._receiptPdfBase64 || null;
+  const pdfFilename =
+    member._receiptPdfFilename ||
+    `Member_Receipt_${String(membership_id || "").replace(/[^a-zA-Z0-9]/g, "_")}.pdf`;
   await dispatch({
     membership_id,
     name,
@@ -200,14 +209,19 @@ const notifyMemberAdded = async (member) => {
     // Template vars: customer_name, membership_id, membership_type
     bodyValues: [name, membership_id, member.membershiptype || "Member"],
     bodyNames: ["customer_name", "membership_id", "membership_type"],
+    documentUrl: pdfUrl,
+    documentFilename: pdfFilename,
     emailSubject: `Welcome to ${SOCIETY}`,
     emailBody:
       `Dear ${name},\n\n` +
       `Welcome to ${SOCIETY}. Your membership has been created successfully.\n\n` +
       `Membership ID: ${membership_id}\n` +
       `Membership Type: ${member.membershiptype || "Member"}\n\n` +
+      (pdfBase64 ? `Your membership receipt is attached.\n\n` : "") +
       `Please keep your Membership ID safe for all future correspondence.\n\n` +
       `Team Gruhakalpa`,
+    pdfBase64,
+    pdfFilename,
   });
 };
 

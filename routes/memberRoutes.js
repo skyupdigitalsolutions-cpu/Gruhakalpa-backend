@@ -14,6 +14,10 @@ router.post('/add-members', upload.fields([
   { name: 'ApplicationDoc', maxCount: 1 },
 ]), memberController.addMember);
 
+// Receive the browser-generated membership-receipt PDF, upload it, and fire
+// the member-added WhatsApp (PDF attached) + email.
+router.post('/member-receipt-pdf', memberController.sendMemberReceipt);
+
 // Get all members
 router.get('/members', memberController.getAllMembers);
 

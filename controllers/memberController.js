@@ -238,10 +238,10 @@ exports.addMember = async (req, res) => {
       data: member,
     });
 
-    // Fire welcome WhatsApp + email in the background (never blocks the response).
-    setImmediate(() => {
-      require("../utils/eventNotifications").notifyMemberAdded(member);
-    });
+    // NOTE: the member-added WhatsApp/email is NOT sent here. It's sent once
+    // the membership-receipt PDF is ready — the frontend generates the PDF and
+    // POSTs it to /member-receipt-pdf, which uploads it and fires the
+    // notification WITH the PDF attached (see sendMemberReceipt below).
   } catch (error) {
     console.error("Error adding member:", error);
 
@@ -386,5 +386,78 @@ exports.updateMember = async (req, res) => {
       message: "Error updating member",
       error: error.message,
     });
+  }
+};
+
+// Receive the browser-generated membership-receipt PDF, upload it to Cloudinary
+// (public URL), and fire the member-added WhatsApp (PDF attached via document
+// header) + email (PDF attachment). Called by the frontend right after a member
+// is created. Fully tolerant: if anything fails it still tries to notify.
+exports.sendMemberReceipt = async (req, res) => {
+  try {
+    const { membership_id, pdfBase64, pdfFilename } = req.body;
+    if (!membership_id) {
+      return res
+        .status(400)
+        .json({ success: false, message: "membership_id is required" });
+    }
+
+    const member = await Member.findOne({ membership_id }).lean();
+    if (!member) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Member not found" });
+    }
+
+    // Upload the PDF to Cloudinary so WhatsApp can attach it via a public URL.
+    let pdfUrl = null;
+    const filename =
+      pdfFilename ||
+      `Member_Receipt_${String(membership_id).replace(/[^a-zA-Z0-9]/g, "_")}.pdf`;
+    if (pdfBase64) {
+      try {
+        const pdfBuffer = Buffer.from(pdfBase64, "base64");
+        const uploadResult = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            {
+              folder: "member-receipts",
+              resource_type: "raw",
+              format: "pdf",
+              public_id: `MemberReceipt_${String(membership_id).replace(/[^a-zA-Z0-9]/g, "_")}`,
+              type: "upload",
+              access_mode: "public",
+            },
+            (error, result) => (error ? reject(error) : resolve(result)),
+          );
+          stream.end(pdfBuffer);
+        });
+        pdfUrl = uploadResult.secure_url;
+        console.log(`✅ Member receipt PDF uploaded: ${pdfUrl}`);
+      } catch (uploadErr) {
+        console.error(
+          "⚠️ Member receipt Cloudinary upload failed:",
+          uploadErr.message,
+        );
+      }
+    }
+
+    // Respond immediately; notify in the background.
+    res.status(200).json({ success: true, pdfUrl });
+
+    setImmediate(() => {
+      require("../utils/eventNotifications").notifyMemberAdded({
+        ...member,
+        _receiptPdfUrl: pdfUrl,
+        _receiptPdfBase64: pdfBase64 || null,
+        _receiptPdfFilename: filename,
+      });
+    });
+  } catch (error) {
+    console.error("sendMemberReceipt error:", error);
+    if (!res.headersSent) {
+      res
+        .status(500)
+        .json({ success: false, message: "Error sending member receipt" });
+    }
   }
 };
