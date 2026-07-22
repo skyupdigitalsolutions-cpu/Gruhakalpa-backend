@@ -86,6 +86,10 @@ const dispatch = async ({
   emailBody,
   pdfBase64 = null,
   pdfFilename = null,
+  // When true, only the WhatsApp is sent and the email is skipped. Used for
+  // the receipt event, where an existing email flow in receiptController
+  // already sends the customer their receipt email — so we avoid a duplicate.
+  skipEmail = false,
 }) => {
   let settings;
   try {
@@ -151,7 +155,7 @@ const dispatch = async ({
 
   // ── Email ──
   const emailOn = !settings.email || settings.email.enabled !== false;
-  if (emailOn && contact.email) {
+  if (!skipEmail && emailOn && contact.email) {
     try {
       const result = await sendMail(
         contact.email,
@@ -382,6 +386,10 @@ const notifyReceipt = async ({
       `Team Gruhakalpa`,
     pdfBase64: pdfBase64 || null,
     pdfFilename: filename,
+    // The receiptController already emails the customer their receipt (with the
+    // login link). Skip the email here so the customer doesn't get a duplicate
+    // — this notification only sends the receipt WhatsApp (with PDF attached).
+    skipEmail: true,
   });
 };
 
