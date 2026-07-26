@@ -1,4 +1,6 @@
 const Member = require("../models/Member");
+const SiteBooking = require("../models/SiteBooking");
+const Receipt = require("../models/Receipt");
 const cloudinary = require("../cloudinaryConfig");
 
 // Generate a unique, sequential membership receipt number (digits only, e.g. 000001).
@@ -386,6 +388,116 @@ exports.updateMember = async (req, res) => {
       message: "Error updating member",
       error: error.message,
     });
+  }
+};
+
+// Cancel membership (mirrors cancelSiteBooking in siteBookingController.js).
+// The Member record is never deleted — only flagged, so history/receipts
+// referencing this membership_id keep working.
+exports.cancelMember = async (req, res) => {
+  try {
+    const { memberId } = req.body;
+    const penaltyAmount = Number(req.body.penaltyAmount) || 0;
+
+    if (!memberId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "memberId is required" });
+    }
+
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Cancellation PDF is required" });
+    }
+
+    // Find the member first
+    const member = await Member.findById(memberId);
+    if (!member) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Member not found" });
+    }
+
+    // Check if already cancelled
+    if (member.cancelled) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Membership is already cancelled" });
+    }
+
+    // Upload PDF to Cloudinary
+    const result = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: "cancellations", resource_type: "raw", format: "pdf" },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        },
+      );
+      stream.end(req.file.buffer);
+    });
+
+    // Mark membership as cancelled — DO NOT DELETE
+    await Member.updateOne(
+      { _id: memberId },
+      {
+        $set: {
+          cancelled: true,
+          cancellationPdfUrl: result.secure_url,
+          cancellationPenalty: penaltyAmount,
+          cancelledAt: new Date(),
+        },
+      },
+    );
+
+    // ── Cascade: also cancel this member's still-active site booking(s) ──────
+    // A membership cancellation is the parent action — an active site booking
+    // can't meaningfully continue without the membership behind it. We reuse
+    // the same cancellation PDF as the supporting document (no separate
+    // penalty is applied here; that's a distinct concern from the site
+    // booking's own penalty and should be entered separately if needed).
+    const cascadedBookings = await SiteBooking.updateMany(
+      { membership_id: member.membership_id, cancelled: { $ne: true } },
+      {
+        $set: {
+          cancelled: true,
+          cancellationPdfUrl: result.secure_url,
+          cancelledAt: new Date(),
+        },
+      },
+    );
+
+    // ── Cascade: mark this member's receipts as cancelled too ─────────────────
+    // Receipt's canonical field is `membershipid` (no underscore), with
+    // `seniority_no` kept as a legacy fallback — NOT `membership_id`.
+    await Receipt.updateMany(
+      {
+        $or: [
+          { membershipid: member.membership_id },
+          { seniority_no: member.membership_id },
+        ],
+      },
+      {
+        $set: {
+          cancelled: true,
+          cancelledAt: new Date(),
+        },
+      },
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Membership cancelled successfully!",
+      cancellationPdfUrl: result.secure_url,
+      cancellationPenalty: penaltyAmount,
+      cascadedSiteBookings: cascadedBookings.modifiedCount || 0,
+    });
+  } catch (error) {
+    console.error("Cancel member error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Error cancelling membership" });
   }
 };
 

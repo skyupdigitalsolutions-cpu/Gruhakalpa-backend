@@ -322,9 +322,17 @@ exports.cancelSiteBooking = async (req, res) => {
       },
     );
 
-    // Also mark matching receipt as cancelled
+    // Also mark matching receipt(s) as cancelled.
+    // NOTE: Receipt's canonical field is `membershipid` (no underscore), with
+    // `seniority_no` kept as a legacy fallback on older records — it is NOT
+    // `membership_id`. Querying the wrong field silently matches nothing.
     await Receipt.updateMany(
-      { membership_id: booking.membership_id },
+      {
+        $or: [
+          { membershipid: booking.membership_id },
+          { seniority_no: booking.membership_id },
+        ],
+      },
       {
         $set: {
           cancelled: true,

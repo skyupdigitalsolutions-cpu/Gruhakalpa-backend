@@ -2,7 +2,15 @@ const express = require('express');
 const router = express.Router();
 const memberController = require('../controllers/memberController');
 const upload = require('../multerConfig');
+const authMiddleware = require('../middleware/authMiddleware');
 
+// Cancel membership (mirrors POST /sitebooking/cancel in siteBookingRoutes.js)
+router.post(
+  '/member/cancel',
+  authMiddleware,
+  upload.single('cancellationPdf'),
+  memberController.cancelMember,
+);
 
 router.put('/members/:id', memberController.updateMemberById);
 

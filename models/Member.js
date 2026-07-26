@@ -100,6 +100,12 @@ const memberSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Membership cancellation (mirrors SiteBooking's cancellation fields).
+    // The member record is never deleted on cancellation — only flagged.
+    cancelled: { type: Boolean, default: false },
+    cancellationPdfUrl: { type: String },
+    cancellationPenalty: { type: Number, default: 0 },
+    cancelledAt: { type: Date },
   },
   {
     timestamps: true,
