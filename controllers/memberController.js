@@ -2,6 +2,7 @@ const Member = require("../models/Member");
 const SiteBooking = require("../models/SiteBooking");
 const Receipt = require("../models/Receipt");
 const cloudinary = require("../cloudinaryConfig");
+const { sortByMembershipId } = require("../utils/membershipId");
 
 // Generate a unique, sequential membership receipt number (digits only, e.g. 000001).
 // Reads the highest existing number and increments; strips any non-digit
@@ -287,7 +288,11 @@ exports.addMember = async (req, res) => {
 // Get all members
 exports.getAllMembers = async (req, res) => {
   try {
-    const members = await Member.find({}).sort({ membership_id: 1 });
+    // Mongo's `.sort({ membership_id: 1 })` is a byte-wise string sort, so it
+    // orders by year and then by the type letter before it ever reaches the
+    // sequence number — GK2025A1339 lands ahead of GK2025P1336. Sort in Node
+    // instead, on the sequence number. See utils/membershipId.js.
+    const members = sortByMembershipId(await Member.find({}).lean());
     res.status(200).json({
       success: true,
       data: members,
