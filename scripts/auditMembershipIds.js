@@ -1,0 +1,209 @@
+/**
+ * PRE-FLIGHT / POST-FLIGHT AUDIT — find membership IDs anywhere in the database.
+ *
+ * WHY THIS EXISTS
+ * The migration script updates a FIXED list of eight collections, and that list
+ * was derived from the files in models/. If a collection holds membership IDs
+ * but has no Mongoose model behind it — a legacy CSV import, an old collection
+ * renamed during development, a one-off backup copy — the migration will not
+ * touch it and nothing will complain. Those rows would keep pointing at the old
+ * 3-digit ID.
+ *
+ * This script does the opposite: it looks at EVERY collection in the database,
+ * finds every string field whose value looks like a membership ID, and tells you
+ * whether that field is covered by the migration.
+ *
+ * USAGE (from the backend project root)
+ *   node scripts/auditMembershipIds.js
+ *
+ * Read-only. It never writes anything, so it is safe to run at any time.
+ *
+ * RUN IT TWICE:
+ *   • BEFORE --commit  → confirms the migration covers everything, and shows
+ *                        how many 3-digit values live in each place
+ *   • AFTER  --commit  → every "3-digit" count should be ZERO. Anything left is
+ *                        a collection the migration does not know about.
+ */
+
+const fs = require("fs");
+const path = require("path");
+
+(function loadEnv() {
+  try {
+    require("dotenv").config({ quiet: true });
+    return;
+  } catch {}
+  for (const candidate of [
+    path.join(process.cwd(), ".env"),
+    path.join(__dirname, "..", ".env"),
+  ]) {
+    if (!fs.existsSync(candidate)) continue;
+    for (const rawLine of fs.readFileSync(candidate, "utf8").split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq < 1) continue;
+      const key = line.slice(0, eq).trim();
+      let val = line.slice(eq + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) ||
+          (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
+      if (!(key in process.env)) process.env[key] = val;
+    }
+    return;
+  }
+})();
+
+let MongoClient;
+try {
+  ({ MongoClient } = require("mongodb"));
+} catch {
+  console.error("\n✗ 'mongodb' not installed. Run: npm install\n");
+  process.exit(1);
+}
+
+const dns = require("dns");
+const URI = process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGODB;
+
+const DNS_OVERRIDE = (() => {
+  const a = process.argv.find((x) => x.startsWith("--dns="));
+  return a ? a.slice(6).split(",").map((s) => s.trim()).filter(Boolean)
+           : ["1.1.1.1", "8.8.8.8"];
+})();
+
+const isSrvDnsFailure = (err) => {
+  const msg = String((err && err.message) || err || "");
+  const syscall = String((err && err.syscall) || "");
+  return /querySrv|queryTxt/i.test(msg) || /querySrv|queryTxt/i.test(syscall);
+};
+
+async function connectWithDnsFallback(uri) {
+  const opts = { serverSelectionTimeoutMS: 20000 };
+  try {
+    const c = new MongoClient(uri, opts);
+    await c.connect();
+    return c;
+  } catch (err) {
+    if (!isSrvDnsFailure(err) || !/^mongodb\+srv:\/\//i.test(uri)) throw err;
+    console.log(`  SRV lookup failed — retrying via ${DNS_OVERRIDE.join(", ")}…`);
+    dns.setServers(DNS_OVERRIDE);
+    const c = new MongoClient(uri, opts);
+    await c.connect();
+    return c;
+  }
+}
+
+// Anything shaped like CODE + 4-digit year + optional letter + 3-or-more digits.
+const LOOKS_LIKE_ID = /^[A-Z]{2,5}\d{4}[A-Z]?\d{3,}$/;
+// Sub-4-digit tail = still needs migrating.
+const THREE_DIGIT = /^[A-Z]{2,5}\d{4}[A-Z]?\d{3}$/;
+
+// What the migration script actually covers. Keep in step with its TARGETS.
+const COVERED = {
+  membership: ["membership_id"],
+  sitebookings: ["membership_id"],
+  receipts: ["membershipid", "seniority_no"],
+  payments: ["membershipid"],
+  fixeddeposits: ["membershipId"],
+  recurringdeposits: ["membershipId"],
+  messagelogs: ["membership_id"],
+  memberlogins: ["membership_id", "username"],
+};
+
+const SAMPLE = 400;   // docs per collection inspected to discover field names
+
+(async () => {
+  if (!URI) {
+    console.error("\n✗ No connection string. Expected MONGODB_URI in .env\n");
+    process.exit(1);
+  }
+
+  let client;
+  const line = "=".repeat(74);
+  try {
+    client = await connectWithDnsFallback(URI);
+    const db = client.db();
+    console.log(line);
+    console.log(`  MEMBERSHIP ID AUDIT — ${db.databaseName}`);
+    console.log(line);
+
+    const colls = (await db.listCollections().toArray())
+      .filter((c) => c.type !== "view")
+      .map((c) => c.name)
+      .sort();
+
+    console.log(`\n${colls.length} collections found\n`);
+
+    const findings = [];
+
+    for (const name of colls) {
+      const col = db.collection(name);
+      const count = await col.countDocuments({});
+      if (!count) continue;
+
+      // Discover candidate string fields by sampling, so we do not need to know
+      // the schema in advance.
+      const sample = await col.find({}, { limit: SAMPLE }).toArray();
+      const candidates = new Set();
+      for (const doc of sample) {
+        for (const [k, v] of Object.entries(doc)) {
+          if (typeof v === "string" && LOOKS_LIKE_ID.test(v.trim())) candidates.add(k);
+        }
+      }
+      if (!candidates.size) continue;
+
+      for (const field of candidates) {
+        const total = await col.countDocuments({ [field]: { $regex: LOOKS_LIKE_ID } });
+        const three = await col.countDocuments({ [field]: { $regex: THREE_DIGIT } });
+        const covered = (COVERED[name] || []).includes(field);
+        findings.push({ name, field, total, three, covered, docs: count });
+      }
+    }
+
+    if (!findings.length) {
+      console.log("  No membership-id-shaped values found anywhere. Nothing to do.");
+    } else {
+      console.log(
+        "  collection".padEnd(24) + "field".padEnd(20) +
+        "id-like".padStart(9) + "3-digit".padStart(9) + "   covered?"
+      );
+      console.log("  " + "-".repeat(70));
+      for (const f of findings) {
+        console.log(
+          "  " + f.name.padEnd(22) + f.field.padEnd(20) +
+          String(f.total).padStart(9) + String(f.three).padStart(9) +
+          "   " + (f.covered ? "yes" : "*** NO ***")
+        );
+      }
+    }
+
+    const uncovered = findings.filter((f) => !f.covered);
+    const remaining = findings.filter((f) => f.three > 0);
+
+    console.log("\n" + line);
+    if (uncovered.length) {
+      console.log("⚠ FIELDS NOT COVERED BY THE MIGRATION");
+      console.log("  These hold membership-id-shaped values but the migration will not");
+      console.log("  touch them. Add them to TARGETS before committing, or confirm they");
+      console.log("  are dead data you do not care about:\n");
+      uncovered.forEach((f) =>
+        console.log(`    { coll: "${f.name}", fields: ["${f.field}"] },   // ${f.three} of ${f.total} still 3-digit`));
+    } else {
+      console.log("✓ Every membership-id field found is covered by the migration.");
+    }
+
+    console.log("");
+    const totalThree = remaining.reduce((a, f) => a + f.three, 0);
+    if (totalThree === 0) {
+      console.log("✓ No 3-digit membership ids remain anywhere. Migration is complete.");
+    } else {
+      console.log(`→ ${totalThree} values still have a 3-digit tail, across ${remaining.length} field(s).`);
+      console.log("  Run this again after --commit; it should report zero.");
+    }
+    console.log(line);
+  } catch (err) {
+    console.error("\n✗ FAILED:", err.message);
+    process.exitCode = 1;
+  } finally {
+    if (client) await client.close().catch(() => {});
+  }
+})();
