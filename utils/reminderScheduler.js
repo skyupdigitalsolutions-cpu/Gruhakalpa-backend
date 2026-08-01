@@ -14,6 +14,7 @@
 
 const ReminderSettings = require("../models/ReminderSettings");
 const { runDueReminders } = require("../controllers/paymentReminderController");
+const { runDueFestivals } = require("../controllers/festivalController");
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // check every 6 hours
 const MIN_GAP_MS = 20 * 60 * 60 * 1000; // but run at most ~once/day
@@ -21,6 +22,17 @@ const MIN_GAP_MS = 20 * 60 * 60 * 1000; // but run at most ~once/day
 const tick = async () => {
   try {
     const settings = await ReminderSettings.getSettings();
+
+    // ── Festival greetings — independent of the payment-reminder toggle.
+    // runDueFestivals only sends a festival on its exact date and at most once
+    // per calendar year, so it's safe to call on every tick.
+    try {
+      const fired = await runDueFestivals();
+      if (fired > 0) console.log(`🎉 Festival greetings fired for ${fired} festival(s) today.`);
+    } catch (e) {
+      console.error("⚠️ Festival check failed:", e.message);
+    }
+
     if (!settings.autoEnabled) return;
 
     const last = settings.lastRunAt ? new Date(settings.lastRunAt).getTime() : 0;

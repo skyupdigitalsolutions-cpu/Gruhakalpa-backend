@@ -18,6 +18,7 @@ const paymentReminderRoutes = require("./routes/paymentReminderRoutes");
 const bankStatementRoutes = require("./routes/bankStatementRoutes");
 const { startReminderScheduler } = require("./utils/reminderScheduler");
 const depositRoutes = require("./routes/depositRoutes");
+const festivalRoutes = require("./routes/festivalRoutes");
 
 const app = express();
 connectDB();
@@ -50,6 +51,7 @@ app.use("/", inwardOutwardRoutes);
 app.use("/", paymentReminderRoutes);
 app.use("/", bankStatementRoutes);
 app.use("/", depositRoutes);
+app.use("/", festivalRoutes);
 
 app.get("/test", (req, res) => {
   res.json({
