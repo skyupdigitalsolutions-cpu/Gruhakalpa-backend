@@ -10,6 +10,8 @@ router.get("/automation/templates", c.requireAutomationAuth, c.getTemplates);
 router.get("/automation/staff", c.requireAutomationAuth, c.getStaffTemplate);
 router.get("/automation/master", c.requireAutomationAuth, c.getMaster);
 router.put("/automation/master", c.requireAutomationAuth, c.setMaster);
+router.get("/automation/whatsapp", c.requireAutomationAuth, c.getWhatsapp);
+router.put("/automation/whatsapp", c.requireAutomationAuth, c.setWhatsapp);
 router.get("/automation/upcoming", c.requireAutomationAuth, c.getUpcoming);
 router.post("/automation/test-staff", c.requireAutomationAuth, c.testStaffReminder);
 router.post("/automation/templates/:templateName/image", c.requireAutomationAuth, c.uploadImage);

@@ -5,7 +5,7 @@ const FestivalGreeting = require("../models/FestivalGreeting");
 const AutomationUser = require("../models/AutomationUser");
 const Member = require("../models/Member");
 const MessageLog = require("../models/MessageLog");
-const ReminderSettings = require("../models/ReminderSettings");
+const AutomationSettings = require("../models/AutomationSettings");
 const cloudinary = require("../cloudinaryConfig");
 const { sendWhatsAppTemplate } = require("../utils/msg91Whatsapp");
 const { fetchMsg91Templates } = require("../utils/msg91Templates");
@@ -253,9 +253,8 @@ exports.toggleAllTemplates = async (req, res) => {
 // ── SENDING ───────────────────────────────────────────────────────────────
 
 const sendToAllMembers = async (doc, { markYear = true } = {}) => {
-  const settings = await ReminderSettings.getSettings();
-  const wa = settings.whatsapp || {};
-  if (!wa.enabled) return { sent: 0, failed: 0, skipped: 0, note: "WhatsApp disabled" };
+  const settings = await AutomationSettings.getSettings();
+  if (!settings.whatsappEnabled) return { sent: 0, failed: 0, skipped: 0, note: "Automation WhatsApp is OFF" };
 
   const members = await Member.find({}, { name: 1, mobile: 1, membership_id: 1 }).lean();
   let sent = 0, failed = 0, skipped = 0;
@@ -266,8 +265,8 @@ const sendToAllMembers = async (doc, { markYear = true } = {}) => {
       const r = await sendWhatsAppTemplate({
         to: String(mobile),
         templateName: doc.templateName,
-        integratedNumber: wa.integratedNumber,
-        languageCode: wa.languageCode || "en",
+        integratedNumber: settings.integratedNumber || process.env.MSG91_WHATSAPP_NUMBER,
+        languageCode: settings.languageCode || "en",
         bodyValues: [m.name || "Member"],
         // Templates use an IMAGE header — send the uploaded image inline.
         imageUrl: doc.imageUrl || null,
@@ -301,11 +300,10 @@ exports.testSend = async (req, res) => {
     const { mobile, name } = req.body;
     if (!mobile) return res.status(400).json({ success: false, message: "mobile required" });
     const doc = await ensureDoc(templateName);
-    const settings = await ReminderSettings.getSettings();
-    const wa = settings.whatsapp || {};
+    const settings = await AutomationSettings.getSettings();
     const r = await sendWhatsAppTemplate({
       to: String(mobile), templateName,
-      integratedNumber: wa.integratedNumber, languageCode: wa.languageCode || "en",
+      integratedNumber: settings.integratedNumber || process.env.MSG91_WHATSAPP_NUMBER, languageCode: settings.languageCode || "en",
       bodyValues: [name || "Member"],
       // Templates use an IMAGE header — send the uploaded image inline.
       imageUrl: doc.imageUrl || null,
@@ -334,9 +332,8 @@ const fmtDMY = (mo, day) => `${String(day).padStart(2, "0")}/${String(mo).padSta
 
 const sendStaffReminder = async (doc, slotKey) => {
   if (!STAFF_NUMBERS.length) return { ok: false, note: "No staff numbers configured", results: [] };
-  const settings = await ReminderSettings.getSettings();
-  const wa = settings.whatsapp || {};
-  if (!wa.enabled) return { ok: false, note: "WhatsApp channel is DISABLED in settings", results: [] };
+  const settings = await AutomationSettings.getSettings();
+  if (!settings.whatsappEnabled) return { ok: false, note: "Automation WhatsApp is OFF (turn it on in the automation panel)", results: [] };
 
   const results = [];
   for (const num of STAFF_NUMBERS) {
@@ -344,8 +341,8 @@ const sendStaffReminder = async (doc, slotKey) => {
       const r = await sendWhatsAppTemplate({
         to: String(num),
         templateName: STAFF_TEMPLATE,
-        integratedNumber: wa.integratedNumber,
-        languageCode: wa.languageCode || "en",
+        integratedNumber: settings.integratedNumber || process.env.MSG91_WHATSAPP_NUMBER,
+        languageCode: settings.languageCode || "en",
         // {{1}} = festival name, {{2}} = festival date (DD/MM)
         bodyValues: [doc.name, fmtDMY(doc.month, doc.day)],
       });
@@ -390,7 +387,7 @@ exports.runDueFestivals = async () => {
 
   // MASTER kill-switch: member greetings only send when this is ON. Staff
   // reminders still fire (they only reach 2 staff, and prompt them to prepare).
-  const settings = await ReminderSettings.getSettings();
+  const settings = await AutomationSettings.getSettings();
   const masterOn = settings.festivalAutomationEnabled === true;
 
   // Iterate EVERY festival (from the date map). Staff reminders fire regardless
@@ -450,8 +447,12 @@ exports.runDueFestivals = async () => {
 // GET /automation/master — read the master festival-automation switch.
 exports.getMaster = async (req, res) => {
   try {
-    const settings = await ReminderSettings.getSettings();
-    res.json({ success: true, festivalAutomationEnabled: settings.festivalAutomationEnabled === true });
+    const settings = await AutomationSettings.getSettings();
+    res.json({
+      success: true,
+      festivalAutomationEnabled: settings.festivalAutomationEnabled === true,
+      whatsappEnabled: settings.whatsappEnabled === true,
+    });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
@@ -460,10 +461,33 @@ exports.getMaster = async (req, res) => {
 // PUT /automation/master  { enabled: true|false }
 exports.setMaster = async (req, res) => {
   try {
-    const settings = await ReminderSettings.getSettings();
+    const settings = await AutomationSettings.getSettings();
     settings.festivalAutomationEnabled = !!req.body.enabled;
     await settings.save();
     res.json({ success: true, festivalAutomationEnabled: settings.festivalAutomationEnabled });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
+// GET /automation/whatsapp — read the automation's own WhatsApp on/off.
+exports.getWhatsapp = async (req, res) => {
+  try {
+    const settings = await AutomationSettings.getSettings();
+    res.json({ success: true, whatsappEnabled: settings.whatsappEnabled === true });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
+// PUT /automation/whatsapp  { enabled: true|false }
+// The automation panel's OWN WhatsApp switch — independent of the admin channel.
+exports.setWhatsapp = async (req, res) => {
+  try {
+    const settings = await AutomationSettings.getSettings();
+    settings.whatsappEnabled = !!req.body.enabled;
+    await settings.save();
+    res.json({ success: true, whatsappEnabled: settings.whatsappEnabled });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
