@@ -16,16 +16,13 @@ const ReminderSettings = require("../models/ReminderSettings");
 const { runDueReminders } = require("../controllers/paymentReminderController");
 const { runDueFestivals } = require("../controllers/festivalController");
 
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // check every 6 hours
-const MIN_GAP_MS = 20 * 60 * 60 * 1000; // but run at most ~once/day
+const CHECK_INTERVAL_MS = 30 * 60 * 1000; // check every 30 minutes (to catch 9:30/10:00/14:00 windows)
+const MIN_GAP_MS = 20 * 60 * 60 * 1000; // payment reminders run at most ~once/day
 
 const tick = async () => {
   try {
-    const settings = await ReminderSettings.getSettings();
-
-    // ── Festival greetings — independent of the payment-reminder toggle.
-    // runDueFestivals only sends a festival on its exact date and at most once
-    // per calendar year, so it's safe to call on every tick.
+    // Festival greetings — fire on their date, at most once per year. Safe to
+    // call every tick regardless of the payment-reminder toggle.
     try {
       const fired = await runDueFestivals();
       if (fired > 0) console.log(`🎉 Festival greetings fired for ${fired} festival(s) today.`);
@@ -33,6 +30,7 @@ const tick = async () => {
       console.error("⚠️ Festival check failed:", e.message);
     }
 
+    const settings = await ReminderSettings.getSettings();
     if (!settings.autoEnabled) return;
 
     const last = settings.lastRunAt ? new Date(settings.lastRunAt).getTime() : 0;
@@ -49,10 +47,11 @@ const tick = async () => {
 };
 
 const startReminderScheduler = () => {
-  // First check shortly after boot, then on a fixed interval.
+  // First check shortly after boot, then every 30 minutes so festival greeting
+  // (09:30) and staff reminders (10:00 / 14:00) fire in their time windows.
   setTimeout(tick, 60 * 1000);
   setInterval(tick, CHECK_INTERVAL_MS);
-  console.log("🔔 Reminder scheduler started (checks every 6h when enabled).");
+  console.log("🔔 Scheduler started (checks every 30 min; festival 09:30, staff reminders 10:00 & 14:00).");
 };
 
 module.exports = { startReminderScheduler };

@@ -18,7 +18,7 @@ const paymentReminderRoutes = require("./routes/paymentReminderRoutes");
 const bankStatementRoutes = require("./routes/bankStatementRoutes");
 const { startReminderScheduler } = require("./utils/reminderScheduler");
 const depositRoutes = require("./routes/depositRoutes");
-const festivalRoutes = require("./routes/festivalRoutes");
+const automationRoutes = require("./routes/automationRoutes");
 
 const app = express();
 connectDB();
@@ -51,7 +51,7 @@ app.use("/", inwardOutwardRoutes);
 app.use("/", paymentReminderRoutes);
 app.use("/", bankStatementRoutes);
 app.use("/", depositRoutes);
-app.use("/", festivalRoutes);
+app.use("/", automationRoutes);
 
 app.get("/test", (req, res) => {
   res.json({
@@ -93,6 +93,16 @@ app.listen(PORT, () => {
   );
   console.log(
     `Database: ${process.env.MONGODB_URI ? "Connected" : "Check connection"}`,
+  );
+  console.log(
+    `MSG91 WhatsApp Key: ${
+      process.env.MSG91_AUTHKEY && !process.env.MSG91_AUTHKEY.includes("your_")
+        ? "✅ Configured"
+        : "❌ NOT CONFIGURED"
+    }`,
+  );
+  console.log(
+    `MSG91 WhatsApp Number: ${process.env.MSG91_WHATSAPP_NUMBER || "❌ NOT CONFIGURED"}`,
   );
 
   // Start the payment-reminder scheduler (runs auto reminders when enabled)

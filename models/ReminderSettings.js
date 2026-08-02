@@ -10,6 +10,14 @@ const reminderSettingsSchema = new mongoose.Schema(
     // Master switch for the auto scheduler
     autoEnabled: { type: Boolean, default: false },
 
+    // MASTER kill-switch for festival greetings. Defaults OFF so that after a
+    // fresh deploy NOTHING is ever sent to the full membership until it's
+    // explicitly turned on — even if individual festivals are toggled on.
+    // Both this master switch AND the per-festival toggle must be ON for a
+    // greeting to auto-send. This is the production safety against accidental
+    // mass sends to all 2000+ members.
+    festivalAutomationEnabled: { type: Boolean, default: false },
+
     // Master switch for event notifications (member/booking/FD/RD/receipt/
     // certificate messages fired automatically when the record is created).
     eventNotificationsEnabled: { type: Boolean, default: true },

@@ -52,9 +52,7 @@ const sendWhatsAppTemplate = async ({
   // secure_url we already store for receipts / FD certificates).
   documentUrl = null,
   documentFilename = null,
-  // Optional IMAGE attached via the template's IMAGE header. The template MUST
-  // be approved in MSG91 with an "Image" header. imageUrl must be a PUBLIC
-  // https link (e.g. a Cloudinary secure_url). Used by festival greetings.
+  // Optional IMAGE attached via the template's IMAGE header (festival greetings).
   imageUrl = null,
 }) => {
   try {
@@ -126,9 +124,8 @@ const sendWhatsAppTemplate = async ({
       };
     }
 
-    // IMAGE header — attaches an image to the message. Only added when an
-    // imageUrl is provided AND the approved template has an Image header.
-    // (documentUrl takes precedence if both are somehow set.)
+    // IMAGE header — attaches an image (festival greetings). Only when imageUrl
+    // is set and no document is attached. Template must have an Image header.
     if (imageUrl && !documentUrl) {
       components["header_1"] = {
         type: "image",
