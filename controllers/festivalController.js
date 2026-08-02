@@ -333,11 +333,12 @@ const STAFF_TEMPLATE = process.env.AUTOMATION_STAFF_TEMPLATE || "wa_gk_staff_upl
 const fmtDMY = (mo, day) => `${String(day).padStart(2, "0")}/${String(mo).padStart(2, "0")}`;
 
 const sendStaffReminder = async (doc, slotKey) => {
-  if (!STAFF_NUMBERS.length) return { note: "No staff numbers configured" };
+  if (!STAFF_NUMBERS.length) return { ok: false, note: "No staff numbers configured", results: [] };
   const settings = await ReminderSettings.getSettings();
   const wa = settings.whatsapp || {};
-  if (!wa.enabled) return { note: "WhatsApp disabled" };
+  if (!wa.enabled) return { ok: false, note: "WhatsApp channel is DISABLED in settings", results: [] };
 
+  const results = [];
   for (const num of STAFF_NUMBERS) {
     try {
       const r = await sendWhatsAppTemplate({
@@ -348,6 +349,7 @@ const sendStaffReminder = async (doc, slotKey) => {
         // {{1}} = festival name, {{2}} = festival date (DD/MM)
         bodyValues: [doc.name, fmtDMY(doc.month, doc.day)],
       });
+      results.push({ to: String(num), success: !!r.success, error: r.success ? "" : (r.error || "unknown") });
       await MessageLog.create({
         membership_id: "", name: "Automation Staff",
         kind: "event", milestone: `staff_reminder_${doc.templateName}_${slotKey}`,
@@ -357,10 +359,13 @@ const sendStaffReminder = async (doc, slotKey) => {
         providerMessageId: r.messageId || "", sentBy: "automation",
       });
     } catch (e) {
+      results.push({ to: String(num), success: false, error: e.message });
       console.error(`⚠️ Staff reminder failed for ${num}:`, e.message);
     }
   }
-  console.log(`📢 Staff reminder sent for "${doc.name}" (${slotKey}) to ${STAFF_NUMBERS.length} staff.`);
+  const ok = results.some((x) => x.success);
+  console.log(`📢 Staff reminder for "${doc.name}" (${slotKey}):`, JSON.stringify(results));
+  return { ok, note: ok ? "sent" : "all failed", results };
 };
 
 // Days between today and a festival's month/day THIS year (0 = today).
@@ -543,14 +548,32 @@ exports.testStaffReminder = async (req, res) => {
 
     const upcoming = await upcomingFestivals(2);
     if (!upcoming.length)
-      return res.json({ success: false, message: "No enabled festivals found." });
+      return res.json({ success: false, message: "No festivals found." });
 
     const names = [];
+    const allResults = [];
+    let anyOk = false;
     for (const { doc } of upcoming) {
-      await sendStaffReminder(doc, "manual_test");
+      const out = await sendStaffReminder(doc, "manual_test");
       names.push(doc.name);
+      allResults.push(...(out.results || []));
+      if (out.ok) anyOk = true;
+      if (out.note && out.note !== "sent" && !out.results.length) {
+        // e.g. WhatsApp disabled — report it clearly
+        return res.json({ success: false, message: out.note });
+      }
     }
-    res.json({ success: true, sentTo: STAFF_NUMBERS, festivals: names, template: STAFF_TEMPLATE });
+    const failed = allResults.filter((r) => !r.success);
+    res.json({
+      success: anyOk,
+      festivals: names,
+      sentTo: STAFF_NUMBERS,
+      template: STAFF_TEMPLATE,
+      results: allResults,
+      message: anyOk
+        ? (failed.length ? `Sent, but some failed: ${failed.map((f) => f.to + " (" + f.error + ")").join(", ")}` : "Sent to all staff")
+        : `All failed: ${failed.map((f) => f.to + " (" + f.error + ")").join(", ")}`,
+    });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
