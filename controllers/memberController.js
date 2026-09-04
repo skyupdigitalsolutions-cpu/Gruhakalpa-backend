@@ -55,6 +55,25 @@ exports.updateMemberById = async (req, res) => {
     delete update.createdAt;
     delete update.updatedAt;
 
+    // Some legacy records store dates (date / dob) as dd-mm-yyyy strings, and a
+    // few have blank / "Invalid Date" values. The edit modal echoes the whole
+    // document back, so an untouched, non-castable date field would reach $set
+    // and crash Mongoose's Date cast (500) — even when the admin only changed
+    // the name. Only pass a date field through when it's a real Date or an
+    // ISO-8601 string (which casts safely). Anything else is dropped, leaving
+    // the stored value untouched. NOTE: dd-mm-yyyy is intentionally NOT
+    // reinterpreted here — new Date("03-08-2023") parses as *March 8*, so
+    // silently coercing it would corrupt the month/day.
+    const DATE_FIELDS = ["date", "dob", "membership_date", "cancelledAt"];
+    const isSafeDate = (v) =>
+      (v instanceof Date && !isNaN(v.getTime())) ||
+      (typeof v === "string" &&
+        /^\d{4}-\d{2}-\d{2}/.test(v.trim()) &&
+        !isNaN(new Date(v).getTime()));
+    for (const f of DATE_FIELDS) {
+      if (f in update && !isSafeDate(update[f])) delete update[f];
+    }
+
     const updated = await Member.updateOne(
       { _id: req.params.id },
       { $set: update },
