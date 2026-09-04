@@ -42,9 +42,22 @@ const parseMembershipDate = (value) => {
 
 exports.updateMemberById = async (req, res) => {
   try {
+    // The frontend sends back the whole member document, which still carries
+    // _id / __v / createdAt / updatedAt. These must never go into $set:
+    //   - _id is immutable, and it arrives as a *string* (not an ObjectId), so
+    //     MongoDB rejects any $set on it with "would modify the immutable field
+    //     '_id'" — a 500 on EVERY edit, regardless of which field changed.
+    //   - __v / createdAt / updatedAt are server-managed and shouldn't be
+    //     overwritten by the client.
+    const update = { ...req.body };
+    delete update._id;
+    delete update.__v;
+    delete update.createdAt;
+    delete update.updatedAt;
+
     const updated = await Member.updateOne(
       { _id: req.params.id },
-      { $set: req.body },
+      { $set: update },
     );
     if (updated.matchedCount === 0) {
       return res
