@@ -1,6 +1,8 @@
 const Receipt = require("../models/Receipt");
 const SiteBooking = require("../models/SiteBooking");
 const Member = require("../models/Member");
+const SuperAdmin = require("../models/SuperAdmin");
+const FixedDeposit = require("../models/FixedDeposit");
 const sendMail = require("../utils/mailer");
 const cloudinary = require("../cloudinaryConfig");
 const {
@@ -74,7 +76,13 @@ exports.updateReceipt = async (req, res) => {
 exports.createReceipt = async (req, res) => {
   try {
     const membershipId = req.body.membershipid;
-    const userEmail = req.body.email;
+    // Email is OPTIONAL. Normalise to a trimmed string, or undefined when
+    // blank, so the receipt is stored without an email and the customer
+    // email is simply skipped (company copy + WhatsApp still go out).
+    const userEmail =
+      typeof req.body.email === "string" && req.body.email.trim()
+        ? req.body.email.trim()
+        : undefined;
 
     // "site" (default) | "fixed_deposit" | "recurring_deposit"
     const paymentcategory = req.body.paymentcategory || "site";
@@ -399,11 +407,11 @@ Gruhakalpa Admin System`;
         const emailPromises = [];
 
         // 1. Send to CUSTOMER email (from form)
-        if (userEmail && userEmail.trim()) {
+        if (userEmail) {
           console.log(`📧 Sending to customer: ${userEmail}`);
           emailPromises.push(
             sendMail(
-              userEmail.trim(),
+              userEmail,
               `Payment Receipt - ${receipt_no}`,
               customerMessage,
               pdfBase64,
@@ -420,7 +428,7 @@ Gruhakalpa Admin System`;
               ),
           );
         } else {
-          console.log(`⚠️ No customer email provided`);
+          console.log(`ℹ️ No customer email provided — skipping customer email`);
         }
 
         // 2. Send to COMPANY email (from .env)
@@ -473,6 +481,76 @@ Gruhakalpa Admin System`;
     res.status(500).json({
       success: false,
       message: "Error creating receipt",
+      error: error.message,
+    });
+  }
+};
+
+// Delete receipt — SUPERADMIN ONLY
+// Route is protected by authMiddleware (valid JWT). Because admin and
+// superadmin tokens carry the same payload shape (no role field), we confirm
+// the token's id belongs to the SuperAdmin collection before deleting.
+exports.deleteReceipt = async (req, res) => {
+  try {
+    const requesterId = req.admin && req.admin.id;
+    const superAdmin = requesterId
+      ? await SuperAdmin.findById(requesterId).select("_id admin_id name")
+      : null;
+
+    if (!superAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Only a superadmin can delete receipts.",
+      });
+    }
+
+    const receipt = await Receipt.findById(req.params.id);
+    if (!receipt) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Receipt not found" });
+    }
+
+    await Receipt.deleteOne({ _id: receipt._id });
+
+    // Detach the deleted receipt from any Fixed Deposit that linked it, so the
+    // FD list doesn't show a dangling receipt entry.
+    try {
+      await FixedDeposit.updateMany(
+        { "receipts.receipt_id": receipt._id },
+        { $pull: { receipts: { receipt_id: receipt._id } } },
+      );
+    } catch (fdErr) {
+      console.error(
+        "⚠️ Failed to detach receipt from Fixed Deposits:",
+        fdErr.message,
+      );
+    }
+
+    // NOTE: the Cloudinary PDF is intentionally NOT destroyed. Receipt PDFs are
+    // uploaded with public_id "<project>_<membershipId>", so every receipt of
+    // the same member shares that asset — deleting it would break the PDF
+    // link of the member's other receipts.
+
+    console.log(
+      `🗑️ Receipt ${receipt.receipt_no} (${receipt.membershipid}) deleted by superadmin ${superAdmin.admin_id || superAdmin._id}`,
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Receipt ${receipt.receipt_no} deleted successfully`,
+      data: { _id: receipt._id, receipt_no: receipt.receipt_no },
+    });
+  } catch (error) {
+    console.error("❌ Error deleting receipt:", error);
+    if (error.name === "CastError") {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid receipt ID" });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Error deleting receipt",
       error: error.message,
     });
   }
