@@ -1,6 +1,7 @@
 const Member = require("../models/Member");
 const jwt = require("jsonwebtoken");
 const { findMemberByAnyMembershipId } = require("../utils/membershipIdCompat");
+const { phoneKey } = require("../utils/phone");
 
 // Member Login — username = membership_id, password = mobile number
 exports.loginMember = async (req, res) => {
@@ -31,7 +32,14 @@ exports.loginMember = async (req, res) => {
     }
 
     // Password = mobile number (as string comparison)
-    if (String(member.mobile) !== String(password).trim()) {
+    // Accept the registered number in any equivalent format:
+    // 9876543210 / +919876543210 / 09876543210, or +447911123456 /
+    // 447911123456 / 00447911123456 for UK members.
+    const typed = String(password).trim();
+    const exact = String(member.mobile) === typed;
+    const sameNumber =
+      !!phoneKey(member.mobile) && phoneKey(member.mobile) === phoneKey(typed);
+    if (!exact && !sameNumber) {
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",

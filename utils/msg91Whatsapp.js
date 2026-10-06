@@ -14,11 +14,13 @@
 const MSG91_URL =
   "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/";
 
-// Normalise an Indian mobile number to MSG91 format: country code + number,
-// no "+", no spaces. Assumes India (91) when a bare 10-digit number is given.
+// Normalise a mobile number to MSG91 format: country code + number,
+// no "+", no spaces. Numbers entered with a country code (+44…, +91…,
+// 0044…) are kept as-is. Bare 10-digit / 0-prefixed numbers are India.
 const normalizePhone = (raw) => {
   let s = String(raw || "").replace(/[^\d]/g, "");
   if (!s) return "";
+  if (s.startsWith("00")) return s.slice(2); // 0044… → 44…
   if (s.length === 10) s = "91" + s;
   if (s.length === 11 && s.startsWith("0")) s = "91" + s.slice(1);
   return s;

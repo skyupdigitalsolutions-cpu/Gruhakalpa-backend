@@ -2,19 +2,22 @@ const SiteBooking = require("../models/SiteBooking");
 const Member = require("../models/Member");
 const Receipt = require("../models/Receipt");
 const cloudinary = require("../cloudinaryConfig");
+const { formatPhone, toPhoneNumber } = require("../utils/phone");
 
 const safeInt = (value) => {
   const parsed = parseInt(value);
   return isNaN(parsed) ? undefined : parsed;
 };
 
-// Normalise a mobile number to a comparable Number (strips spaces, +91, etc.)
+// Normalise a mobile number to a comparable Number.
+//   India → 10-digit local (9876543210) — unchanged from before, so existing
+//           bookings and the duplicate check keep matching.
+//   UK / other → full digits WITH country code (447911123456). Previously
+//           only the last 10 digits were kept, which turned a UK number into
+//           a fake Indian one (WhatsApp went to 91…).
 const normaliseMobile = (value) => {
-  if (value === undefined || value === null) return undefined;
-  const digits = String(value).replace(/\D/g, "").slice(-10); // keep last 10 digits
-  if (!digits) return undefined;
-  const parsed = parseInt(digits, 10);
-  return isNaN(parsed) ? undefined : parsed;
+  if (value === undefined || value === null || value === "") return undefined;
+  return toPhoneNumber(value);
 };
 
 // Map a set of due dates onto an installments array. dueDates may arrive as:
@@ -66,7 +69,10 @@ exports.updateSiteBookingById = async (req, res) => {
     const updateFields = {};
     if (membership_id !== undefined) updateFields.membership_id = membership_id;
     if (name !== undefined) updateFields.name = name;
-    if (mobilenumber !== undefined) updateFields.mobilenumber = mobilenumber;
+    if (mobilenumber !== undefined && mobilenumber !== "") {
+      const m = normaliseMobile(mobilenumber);
+      if (m !== undefined) updateFields.mobilenumber = m;
+    }
     if (projectname !== undefined) updateFields.projectname = projectname;
     if (sitedimension !== undefined) updateFields.sitedimension = sitedimension;
     if (designation !== undefined) updateFields.designation = designation;
@@ -175,7 +181,7 @@ exports.createSiteBooking = async (req, res) => {
         return res.status(409).json({
           success: false,
           code: "DUPLICATE_MOBILE",
-          message: `Site booking already exists for this user (mobile ${mobilenumber}) under membership ${existingByMobile.membership_id}.`,
+          message: `Site booking already exists for this user (mobile ${formatPhone(mobilenumber)}) under membership ${existingByMobile.membership_id}.`,
         });
       }
     }

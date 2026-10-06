@@ -5,6 +5,7 @@ const SuperAdmin = require("../models/SuperAdmin");
 const FixedDeposit = require("../models/FixedDeposit");
 const sendMail = require("../utils/mailer");
 const cloudinary = require("../cloudinaryConfig");
+const { formatPhone, toPhoneNumber } = require("../utils/phone");
 const {
   sendPaymentConfirmation,
 } = require("./paymentReminderController");
@@ -239,8 +240,12 @@ exports.createReceipt = async (req, res) => {
       date: new Date(req.body.date),
       amountpaid,
       bookingamount,
+      // Canonical phone: Indian → 10-digit local, UK/other → full digits
+      // with country code (447911123456). parseInt used to cut
+      // "+44 7911 123456" down to 44.
       mobilenumber:
-        parseInt(req.body.mobilenumber) || (memberDoc ? memberDoc.mobile : undefined),
+        toPhoneNumber(req.body.mobilenumber) ||
+        toPhoneNumber(memberDoc ? memberDoc.mobile : undefined),
       totalreceived: bookingamount + amountpaid,
       paymentmode: req.body.paymentmode,
       paymenttype: req.body.paymenttype,
@@ -386,7 +391,7 @@ The Gruhakalpa Housing Co-Operative Society Ltd.`;
 Member Name      : ${receiptData.name}
 ${categoryLine}  : ${membershipId}
 Customer Email   : ${userEmail || "Not provided"}
-Mobile           : ${receiptData.mobilenumber || "Not provided"}
+Mobile           : ${formatPhone(receiptData.mobilenumber) || "Not provided"}
 
 ---
 
